@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Browse the consolidated marketplace product catalog.">
+  <title>Products | Marketplace Catalog Consolidator</title>
+  <link rel="stylesheet" href="/css/catalog-ui.css">
+  <script src="/js/catalog-ui.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/">Marketplace Catalog</a>
+    <nav aria-label="Primary navigation">
+      <a href="/" aria-current="page">Products</a>
+      <a href="/uploads.html">Uploads</a>
+      <a href="/swagger/">Swagger</a>
+    </nav>
+  </header>
+
+  <main class="page-shell">
+    <section class="hero" aria-labelledby="page-title">
+      <p class="eyebrow">Canonical catalog</p>
+      <h1 id="page-title">Products</h1>
+      <p>Search canonical products and inspect the seller offers linked to each one.</p>
+    </section>
+
+    <section class="card" aria-labelledby="filters-title">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Refine results</p>
+          <h2 id="filters-title">Catalog filters</h2>
+        </div>
+      </div>
+      <form id="catalog-filters" class="filter-grid">
+        <label>Category<input id="category" name="category" autocomplete="off"></label>
+        <label>Brand<input id="brand" name="brand" autocomplete="off"></label>
+        <label>Product name<input id="name" name="name" autocomplete="off"></label>
+        <label>Seller name<input id="sellerName" name="sellerName" autocomplete="off"></label>
+        <label>Page size
+          <select id="pageSize" name="pageSize">
+            <option value="10">10</option>
+            <option value="25" selected>25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </label>
+        <div class="form-actions">
+          <button type="submit">Search</button>
+          <button type="reset" class="button-secondary">Reset</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card" aria-labelledby="results-title">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Results</p>
+          <h2 id="results-title">Canonical products</h2>
+        </div>
+        <p id="catalog-status" class="status-message" role="status" aria-live="polite"></p>
+      </div>
+      <div id="catalog-table-wrap" class="table-wrap" aria-busy="false">
+        <table>
+          <caption class="visually-hidden">Canonical products and linked seller offers</caption>
+          <thead><tr><th scope="col">ID</th><th scope="col">Name</th><th scope="col">Brand</th><th scope="col">Category</th><th scope="col">Seller offers</th></tr></thead>
+          <tbody id="catalog-rows"></tbody>
+        </table>
+      </div>
+      <p id="catalog-empty" class="empty-state" hidden>No products match these filters.</p>
+      <div class="pagination" aria-label="Catalog pagination">
+        <button id="catalog-previous" type="button" class="button-secondary">Previous</button>
+        <span id="catalog-page">Page 1</span>
+        <button id="catalog-next" type="button" class="button-secondary">Next</button>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
