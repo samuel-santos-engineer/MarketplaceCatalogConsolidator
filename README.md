@@ -11,6 +11,10 @@
 
 Marketplace Catalog Consolidator is a .NET 10 API for consolidating seller product catalogs into a canonical SQLite catalog. The project is being delivered incrementally against [the solution design](docs/MarketplaceCatalogConsolidator-Solution-Design.md). Milestone 9 adds a public UUID v4 generator to the existing upload, lab reset, public read, Swagger, and operational features. Docker/Azure work is reserved for the final deployment milestone.
 
+## Final sign-off
+
+The consolidated assessment is **100/100 — Ready for final submission** at merged baseline `2491292`, supported by 173 passing tests, successful Release build and formatting verification, clean secret scans, and the real 269-entry HTTP import workflow. See the [Final Sign-Off](docs/MarketplaceCatalogConsolidator-Final-Sign-Off.md) for the complete requirement-to-evidence mapping, mandatory assessment gates, and CI links.
+
 ## Architecture
 
 ```text
