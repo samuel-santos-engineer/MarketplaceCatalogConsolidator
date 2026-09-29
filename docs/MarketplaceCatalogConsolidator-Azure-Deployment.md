@@ -36,33 +36,26 @@ Re-run the non-mutating gate when the subscription changes:
 
 The script prints only non-secret identity, subscription, and capability results. It keeps its Azure access token in memory and never prints or writes it.
 
-## One-time OIDC and secret setup
+## Local operator authentication
 
-The manual workflow requires these GitHub Actions secrets:
+The deployment is run locally from a clean, up-to-date `main` checkout. No Azure or GHCR credential is stored in the repository or GitHub Actions.
 
-- `AZURE_CLIENT_ID`: application/client ID for an Entra application or user-assigned managed identity.
-- `AZURE_TENANT_ID`: tenant ID used by the active subscription.
-- `AZURE_SUBSCRIPTION_ID`: target subscription ID.
-- `PRODUCTION_API_KEY`: strong application upload key, generated and stored as a secret.
+1. Sign in interactively with `az login`, select the intended subscription with `az account set --subscription <subscription-id>`, and verify it with `az account show`.
+2. Sign in to GitHub CLI as the repository owner using `gh auth login` and verify the account with `gh api user --jq .login`. The account needs permission to publish the package and change its visibility to public.
+3. Ensure Docker Desktop is running. The deployment script invokes `docker login ghcr.io` interactively; enter a GitHub credential only into Docker's prompt, never into the script, shell command, repository, or chat.
+4. Run `./infra/azure/Deploy-AppServiceF1.ps1` from the repository. The production API key is requested using a hidden PowerShell prompt and is sent only to the new App Service settings resource over the authenticated Azure CLI session.
 
-Configure a federated identity credential for this repository's `main` branch with subject:
+The local operator's Azure identity must have permission to create a resource group and its App Service plan, web app, and settings in the selected subscription. No service principal secret, publish profile, PAT in a file, or GitHub Actions secret is used.
 
-```text
-repo:samuel-santos-engineer/MarketplaceCatalogConsolidator:ref:refs/heads/main
-```
+## Review, merge, and local deployment
 
-Grant the federated principal only the role needed to create the named resource group and its App Service resources. Do not add a client secret, publish profile, personal access token, registry password, or API key to the repository. The workflow uses GitHub's short-lived OIDC token for Azure and `GITHUB_TOKEN` for GHCR.
+1. Review and merge the local-deployment replacement PR. Do not deploy from its feature branch.
+2. Update the checkout to `main` and run `./infra/azure/Deploy-AppServiceF1.ps1`.
+3. Confirm the displayed identity/subscription and type the app-specific deployment confirmation. The script repeats the read-only Linux F1/custom-container gate, checks name availability, and refuses existing target resources before building or publishing.
+4. Authenticate to GHCR interactively when Docker prompts. The script builds only the full merge-commit SHA tag, reads the digest, makes the package public using the authenticated GitHub CLI session, and proves anonymous manifest access before creating Azure resources.
+5. It creates the Linux F1 plan and HTTPS-only app in `westcentralus`, applies production settings including `Catalog__StorageRoot=/home/data`, configures the digest-pinned public image, and validates the UI, Swagger, health, readiness, upload/status/report, configuration, and report persistence after one controlled restart.
 
-## Review, merge, and dispatch
-
-1. Review and merge the deployment PR. Do not dispatch from a PR branch.
-2. Confirm the four secret names above exist in repository Actions settings.
-3. Open **Actions → Deploy immutable container to Azure App Service → Run workflow** on `main`.
-4. Keep the documented names and set **Confirm deployment must remain Linux F1 in West Central US** to `true`.
-5. The workflow refuses pre-existing target resources, rechecks Linux F1 region availability, builds the frozen Dockerfile, pushes only the full-SHA tag, makes the package public, and proves an anonymous pull before creating Azure resources.
-6. It deploys `ghcr.io/samuel-santos-engineer/marketplace-catalog-consolidator@sha256:<digest>`, enables HTTPS-only and `/home` storage, then validates UI, Swagger, health, readiness, upload/status/report, digest pinning, storage configuration, and report persistence after one controlled restart.
-
-If public-package visibility cannot be changed, OIDC/secrets are absent, F1 validation fails, the name becomes unavailable, or any validation fails, the workflow stops. Do not substitute a paid tier, another region, registry credentials, or weaker Azure authentication.
+If public-package visibility cannot be changed, F1 validation fails, the name is unavailable, or any validation fails, stop. Do not substitute a paid tier or another region. The script refuses existing Azure resources; it does not delete partially created resources on failure, so inspect and report any partial provisioning before rerunning.
 
 ## Post-deployment evidence to retain
 
