@@ -1,0 +1,47 @@
+# .NET build and IDE output
+**/bin/
+**/obj/
+.vs/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+.agents/
+.codex/
+
+# Local Python environment created for asset inspection
+.venv/
+__pycache__/
+
+# Local secrets and settings
+.env
+.env.*
+!*.example
+**/appsettings.Development.json
+
+# Runtime data; the supplied root catalog.db remains a tracked source asset
+/data/
+/home/data/
+/reports/
+/uploads/
+*.working.db
+*.db
+*.db-*
+*.db.bak*
+*.sqlite
+*.sqlite3
+!/catalog.db
+*.sqlite-wal
+*.sqlite-shm
+
+# Test and build artifacts
+TestResults/
+artifacts/
+coverage/
+*.trx
+*.log
+*.pem
+*.key
+*.pfx
+*.p12

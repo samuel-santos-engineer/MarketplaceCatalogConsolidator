@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Verify solution
+        run: sh scripts/verify.sh
+
+  secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Download pinned scanner and verify checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=8.30.1
+          archive="gitleaks_${version}_linux_x64.tar.gz"
+          checksums="gitleaks_${version}_checksums.txt"
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${version}"
+          scanner_dir="$(mktemp -d)"
+          cd "$scanner_dir"
+          curl --fail --silent --show-error --location "$base/$archive" --output "$archive"
+          curl --fail --silent --show-error --location "$base/$checksums" --output "$checksums"
+          grep "  $archive\$" "$checksums" | sha256sum --check --strict
+          tar -xzf "$archive" gitleaks
+          echo "$scanner_dir" >> "$GITHUB_PATH"
+      - name: Scan checkout and history without credentials
+        shell: bash
+        run: |
+          gitleaks dir . --config .gitleaks.toml --redact --no-banner
+          gitleaks git . --config .gitleaks.toml --redact --no-banner
