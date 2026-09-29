@@ -1,0 +1,10 @@
+{
+  "region": "westcentralus",
+  "planSku": "F1",
+  "resourceGroup": "rg-marketplace-catalog-wcus",
+  "planName": "plan-marketplace-catalog-f1-wcus",
+  "appName": "marketplace-catalog-consolidator-ss-wcus",
+  "imageRepository": "ghcr.io/samuel-santos-engineer/marketplace-catalog-consolidator",
+  "storageRoot": "/home/data",
+  "containerPort": 8080
+}
