@@ -52,9 +52,17 @@ Every REST endpoint uses URL-segment versioning. The initial release is `v1`; br
 | `Idempotency-Key` | Required RFC 4122 UUID v4                                      |
 | `X-Api-Key`       | Required secret, configured only in Azure App Service settings |
 
-The response is `202 Accepted` and contains `uploadId`, current state, display filename, and SHA-256, with a `Location` header pointing to the live public status endpoint. Milestone 6 implements every route in the API table; only POST requires an API key. See the root solution design and README for the current public response contracts.
+The response is `202 Accepted` and contains `uploadId`, current state, display filename, and SHA-256, with a `Location` header pointing to the implemented public `/api/v1/uploads/{uploadId}/status` endpoint.
 
-The same idempotency key and file SHA-256 return the existing upload rather than creating a second attempt. Reusing the key with another file returns `409 Conflict`.
+The same idempotency key and file SHA-256 return the existing upload rather than creating a second attempt. Reusing the key with another file returns `409 Conflict`. The database unique constraint and atomic create-or-get statement arbitrate concurrent same-key requests.
+
+The upload API key is read from `Security__ApiKey` configuration/environment only and is compared in constant time. Missing or invalid credentials return the same `401` error envelope. The API accepts exactly one multipart file field named `file`; unsupported content types return `415`, invalid multipart/JSON or idempotency values return `400`, and files of 500,000 bytes or more return `413`. All errors use `{ "traceId", "code", "message" }`. Swagger UI is public at `/swagger/` and the OpenAPI document is `/openapi/v1.json`; credentials are never included in the specification.
+
+Milestone 6 implements all seven routes in the API contract. Only the upload POST requires an API key. Upload history supports a named `status` filter, defaults to page 1/size 25, and orders by start instant descending then ID descending. Status defaults to page 1/size 50 for persisted items ordered by source index. All page sizes are limited to 100; invalid pagination returns the standard `400` envelope. Public projections exclude idempotency keys, physical paths, and internal diagnostics. Status returns `upload` metadata, trace ID, safe failure fields, and an `items` page.
+
+Report downloads resolve the expected server-generated path through persisted metadata and verify the final SHA-256, JSON, upload identity, and terminal state before sending the exact original bytes as `application/json`. Unknown/invalid IDs return `404`; non-terminal or report-pending uploads return `409 report_not_available`; missing or invalid terminal reports return safe `500 report_unavailable` errors with structured logs. Download never generates a replacement. Report availability flags reflect finalized database metadata; file verification happens on download.
+
+Health performs no dependency I/O. Readiness opens the existing working database in read/write mode without creating a replacement, verifies foreign-key enforcement, and probes both storage roots using temporary flushed files deleted on close. Failure returns `503 not_ready` without paths or exceptions.
 
 ### 3.2 Catalog endpoint
 
@@ -62,7 +70,7 @@ The same idempotency key and file SHA-256 return the existing upload rather than
 GET /api/v1/catalog?category=&brand=&name=&sellerName=&page=1&pageSize=25
 ```
 
-The endpoint returns canonical products, their seller offers, and pagination metadata. Filters ignore case, accents, and repeated whitespace; they never modify stored values. Category, brand, and seller name match whole values; name matches a literal substring. Products order by ID ascending and appear once regardless of seller count. A seller filter restricts returned offers to that seller. Page sizes default to 25 (50 for status items), with maximum 100. Upload history orders by start instant descending then ID descending. Reports verify durable metadata and SHA-256 before returning exact immutable JSON bytes; health performs no I/O and readiness probes SQLite and temporary storage writes.
+The endpoint returns canonical products, their seller offers, and pagination metadata (`items`, `pageNumber`, `pageSize`, `totalCount`). Page/size default to 1/25; size is capped at 100. Products use ID ascending and appear once even with multiple sellers. Category, brand, and seller name use whole-value matches; name uses literal substring matching. Filters ignore case, accents, and repeated whitespace; blank filters are omitted. Parameterized SQLite queries filter canonical values without modifying them. Seller filtering restricts returned offers to matching sellers; otherwise all offers are returned in offer-ID order. Offers expose seller name and seller source-product ID only. Offset page membership may shift during concurrent writes.
 
 ### 3.3 Error response
 
@@ -115,6 +123,8 @@ Upload
 - Status, StartedAtUtc, CompletedAtUtc
 - ReceivedCount, ApprovedCount, CleanedCount, RejectedCount
 - TraceId, FailureCode, FailureMessage
+- IntendedTerminalStatus, ConsolidationFinishedAtUtc
+- ReportGeneratedAtUtc, ReportGenerationFailureCode, ReportGenerationFailureMessage
 
 UploadItem
 - UploadId, SourceIndex, SourceProductId
@@ -134,9 +144,11 @@ UploadItem
 stateDiagram-v2
     [*] --> Queued
     Queued --> Processing
-    Processing --> Completed
-    Processing --> CompletedWithRejections
-    Processing --> Failed
+    Processing --> ReportPending
+    ReportPending --> Completed
+    ReportPending --> CompletedWithRejections
+    ReportPending --> Failed
+    ReportPending --> ReportPending: report generation retry
     Processing --> Queued: restart recovery
 ```
 
@@ -144,12 +156,18 @@ stateDiagram-v2
 2. Calculate a SHA-256 digest.
 3. Atomically move the file to `/home/data/uploads/{uploadId}.json`.
 4. Insert an `Upload` record with state `Queued`.
-5. A single worker claims one queued upload transactionally.
-6. Process each source entry in its own SQLite transaction.
-7. On application restart, return incomplete `Processing` uploads to `Queued`; committed `UploadItem` rows are not processed again.
-8. Generate the report to a temporary file and atomically rename it to `/home/data/reports/{uploadId}.json`.
-9. Mark the upload terminal only after report generation succeeds.
-10. Delete the staged source JSON after final report creation. Keep reports according to the lab retention policy.
+5. Before the host accepts requests, ensure the working database exists, apply migrations, and under the shared workflow lock return interrupted `Processing` uploads to `Queued`. Repeating recovery is idempotent and leaves persisted item outcomes intact.
+6. Exactly one hosted polling worker uses the same persistent-root lock and atomically claims a queued upload with a short SQLite state transition. It does not hold a SQLite transaction while invoking the item processor.
+7. Process each uncompleted source index independently. Persist each terminal `UploadItem` outcome immediately; a typed item rejection is recorded and later indexes continue. A restart skips item indexes already persisted.
+8. Cancellation requeues the active upload. An unrecoverable workflow or persistence failure records `Failed` with a generic, non-sensitive failure code and message.
+9. Persist summary counts, `IntendedTerminalStatus`, and `ConsolidationFinishedAtUtc`, changing the upload to non-terminal `ReportPending`.
+10. Build the explicit JSON report from durable `Upload` and `UploadItem` records. Write a unique temporary file in the report directory, flush it to disk, and atomically move it to `/home/data/reports/{uploadId}.json` without replacement.
+11. Read back and verify the published JSON against durable data, calculate its SHA-256, and persist report path/hash, `ReportGeneratedAtUtc`, `CompletedAtUtc`, and the intended terminal status in a short SQLite update.
+12. Delete the staged source JSON after report finalization. Keep reports according to the lab retention policy.
+
+If report publication succeeded but the database finalization did not, startup verifies and reuses the existing final report before completing the terminal transition. If report generation fails before publication, the upload remains `ReportPending` with safe retry diagnostics. Startup removes only report temporary files matching the application's exact temp naming pattern; final reports are never removed or replaced.
+
+The current implementation establishes startup recovery, the serialized workflow, source JSON parsing, per-item catalog consolidation, immutable report finalization, authenticated HTTP upload acceptance, and the public read API. The processor reads the persisted staged file through the staging-file port and commits canonical product changes, seller links, and item outcomes in one SQLite transaction.
 
 If persistent storage cannot safely accept a new upload, return `507 Insufficient Storage`.
 
@@ -171,10 +189,10 @@ For each entry:
 
 1. Validate required fields and a GUID-shaped source `Id`.
 2. Apply the agreed suspicious-SQL-input business rule; every SQL operation remains parameterized regardless.
-3. Use `SourceTextCleaner` to preserve Unicode letters/digits and visible ASCII, remove other characters, trim fields, and collapse internal whitespace. ASCII quotes and apostrophes remain valid.
+3. Trim fields and collapse internal whitespace.
 4. Normalize case and remove accents for comparison.
 5. Clean category alias `Photo` to `Photography`.
-6. Preserve valid cleaned seller, brand, and category values, including values not yet present in `Product`. Only empty optional brand/category values become `NULL`.
+6. Resolve brand and category against values known in `Product`; an unknown value becomes `NULL`.
 7. Strictly match normalized `Brand + Name + Category` only when all three normalized fields are present.
 8. If matching succeeds, add the seller offer for the existing product.
 9. If matching fails, create a new product with the cleaned values and add the seller offer.
@@ -207,8 +225,12 @@ Every upload attempt produces one standalone JSON report outside SQLite, includi
 {
   "uploadId": "guid",
   "fileName": "ProductEntry.json",
+  "fileHash": "sha256-hex",
+  "traceId": "guid",
   "startedAtUtc": "2026-09-29T03:00:00Z",
-  "completedAtUtc": "2026-09-29T03:00:02Z",
+  "consolidationFinishedAtUtc": "2026-09-29T03:00:01Z",
+  "reportGeneratedAtUtc": "2026-09-29T03:00:02Z",
+  "terminalAtUtc": "2026-09-29T03:00:02Z",
   "status": "CompletedWithRejections",
   "summary": {
     "received": 269,
@@ -216,6 +238,8 @@ Every upload attempt produces one standalone JSON report outside SQLite, includi
     "cleaned": 15,
     "rejected": 4
   },
+  "failureCode": null,
+  "failureMessage": null,
   "items": [
     {
       "id": "source-guid",
@@ -230,19 +254,22 @@ Every upload attempt produces one standalone JSON report outside SQLite, includi
 }
 ```
 
-Each cleaned item names the changed field and shows its final value, for example `Name: Smartphone Galaxy S23 Linked seller FitnessCenter to existing product 2.` Accepted items with unchanged values are `Approved`; any changed reported value produces `Cleaned`. Raw fields preserve the original input. The report path and SHA-256 are stored in `Upload`; the report body remains a file artifact.
+Each cleaned item names the changed field and shows before/after values. Reports use a stable JSON property order and source-index item order. The report path and SHA-256 are stored in `Upload`; terminal state is not persisted until the report has been atomically published and verified from disk. A `ReportPending` state retains intended status and summary counts across retries.
 
 ## 8. Security and operations
 
 - Public read endpoints and public Swagger make the assessment easy to review.
 - `POST /api/v1/uploads` requires `X-Api-Key`; the secret is never committed, logged, included in reports, or passed in a query string.
 - The API key comparison uses a constant-time comparison.
-- Milestone 7 uses separate fixed-window policies: 5 uploads/minute and 120 public reads/minute per connection peer, no queue, with standard `429` envelopes and retry metadata. Forwarded-IP headers are not trusted. Startup validates credentials and storage configuration; safe global errors/logs, bounded bodies, and Swagger-compatible security headers are implemented. See the root design and README for operational details.
+- Milestone 7 rate limits uploads to 5/minute per connection peer and public reads/OpenAPI to a separate 120/minute. Both fixed-window policies have no queue and return safe `429` envelopes with `Retry-After` metadata. Arbitrary forwarded-IP headers are not trusted; automatic forwarded-header processing must be disabled. Limits are per process.
 - Use HTTPS only.
 - Run the Docker image as a non-root user.
 - Use structured logs with `traceId`, `uploadId`, and source index.
 - `GET /api/v1/ready` validates SQLite, staging, and report-directory writability.
 - Back up the supplied SQLite database before the first forward-only migration.
+- Startup validates a non-empty environment-configured API key, a readable starter asset, and separate working storage. An explicitly enabled Development-only placeholder convention is rejected outside Development.
+- Global HTTP failures and report/readiness errors log trace/upload IDs and exception types without headers, raw data, paths, or exception messages. Responses always use the safe error envelope. Security headers preserve Swagger compatibility; HTTPS responses receive HSTS.
+- Total upload requests are bounded to 532,768 bytes, independently of the strictly-less-than-500,000-byte file rule.
 
 ## 9. Test proof
 
@@ -262,8 +289,8 @@ The automated suite must prove:
 
 ## 10. Delivery standards
 
-- `.NET 10`, Dockerfile baseline, Swagger/OpenAPI, and GitHub Actions build/test/format/secret scanning. Image verification remains deferred to deployment.
+- `.NET 10`, Dockerfile baseline, public Swagger/OpenAPI, and GitHub Actions build/test/format/secret scanning. Docker image verification is deferred to the final deployment milestone.
 - Unit tests for normalization and policies; integration tests against SQLite.
 - Seed database and supplied JSON fixture.
 - README with assumptions, architecture, local run, Azure deployment, API usage, and Swagger validation walkthrough.
-- Changes use feature branch -> PR -> user review -> user merge to main. The user performs all merges. CI uses a pinned native scanner without secrets or Python.
+- Repository governance requires feature branch -> pull request -> user review -> user merge to main. The user performs all merges; project code is never pushed directly to `main`. CI scans source and Git history with a pinned native Gitleaks binary and requires no scanner secrets or Python tooling.
