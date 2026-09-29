@@ -274,6 +274,45 @@ public sealed class SourceCatalogConsolidationTests
     }
 
     [Theory]
+    [InlineData("Galaxy S22", "Galaxy S23", "Samsung")]
+    [InlineData("Galaxy S23", "Galaxy S22", "Samsung")]
+    [InlineData("iPhone 13 128GB", "iPhone 13 256GB", "Apple")]
+    [InlineData("iPhone 13 256GB", "iPhone 13 128GB", "Apple")]
+    public async Task DifferentGenerationsAndCapacitiesDoNotConsolidate(string existingName, string incomingName, string brand)
+    {
+        using var fixture = new ConsolidationFixture();
+        // Keep this identity namespace independent of the assessment starter's contents.
+        const string category = "Regression Smartphones";
+        var existingId = await fixture.EnsureProductAsync(existingName, brand, category);
+        var beforeCount = await fixture.CountAsync("SELECT COUNT(*) FROM Product;");
+
+        var result = await fixture.ProcessAsync(Source("VariantSeller", incomingName, brand, category));
+
+        Assert.Equal(UploadItemStatus.Approved, result.Status);
+        Assert.NotNull(result.MatchedProductId);
+        var incomingId = result.MatchedProductId.Value;
+        Assert.NotEqual(existingId, incomingId);
+        Assert.Equal(incomingName, result.CleanedName);
+        Assert.Equal(existingName, await fixture.ReadProductNameAsync(existingId));
+        Assert.Equal(incomingName, await fixture.ReadProductNameAsync(incomingId));
+        Assert.Equal(beforeCount + 1, await fixture.CountAsync("SELECT COUNT(*) FROM Product;"));
+        Assert.Equal(0, await fixture.CountAsync("SELECT COUNT(*) FROM SellerProduct WHERE SellerName = $seller AND ProductId = $product;",
+            ("$seller", "VariantSeller"), ("$product", existingId)));
+        Assert.Equal(1, await fixture.CountAsync("SELECT COUNT(*) FROM SellerProduct WHERE SellerName = $seller AND ProductId = $product;",
+            ("$seller", "VariantSeller"), ("$product", incomingId)));
+        var saved = Assert.Single(await fixture.ItemStore.GetByUploadIdAsync(fixture.LastUploadId));
+        Assert.Equal(incomingId, saved.MatchedProductId);
+        Assert.Equal(UploadItemStatus.Approved, saved.Status);
+
+        var repeat = await fixture.ProcessAsync(Source("SecondVariantSeller", incomingName, brand, category));
+        Assert.Equal(UploadItemStatus.Approved, repeat.Status);
+        Assert.Equal(incomingId, repeat.MatchedProductId);
+        Assert.Equal(beforeCount + 1, await fixture.CountAsync("SELECT COUNT(*) FROM Product;"));
+        Assert.Equal(1, await fixture.CountAsync("SELECT COUNT(*) FROM SellerProduct WHERE SellerName = $seller AND ProductId = $product;",
+            ("$seller", "SecondVariantSeller"), ("$product", incomingId)));
+    }
+
+    [Theory]
     [InlineData("Tablet iPad Pro 12.9\"", "Tablet iPad Pro 12.9")]
     [InlineData("Optional Model 34", "Optional Model 34\"")]
     public async Task OptionalInchQuoteLinksExistingProductWithoutChangingDisplayOrStatus(string canonicalName, string sourceName)

@@ -3,7 +3,7 @@
 # Marketplace Catalog Consolidator
 
 [![Milestone](https://img.shields.io/badge/milestone-9-blue)](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/milestones)
-[![Tests](https://img.shields.io/badge/tests-168%20passing-brightgreen)](tests)
+[![Tests](https://img.shields.io/badge/tests-172%20passing-brightgreen)](tests)
 [![CI](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/actions/workflows/ci.yml)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![Docker](https://img.shields.io/badge/Docker-containerized-2496ED?logo=docker)](Dockerfile)
@@ -33,6 +33,21 @@ Source cleaning is centralized in `SourceTextCleaner`: preserve Unicode letters/
 ## Product matching
 
 Product-name comparison keys ignore exactly one trailing ASCII double quote when it immediately follows a digit, treating that quote as an optional inch marker. Thus `Tablet iPad Pro 12.9` and `Tablet iPad Pro 12.9"` can link to the same product; brand and category still match strictly. Internal quotes, repeated quotes, curly quotes, apostrophes, and other punctuation remain significant. The exception changes comparison keys only: it does not rewrite source or canonical display values or mark an otherwise unchanged item `Cleaned`. Migration refreshes existing working-database keys without merging existing rows or rewriting historical reports; if multiple rows now share an identity, lookup selects the lowest product ID.
+
+### Matching safety and identifier policy
+
+The current input contract contains `Id`, `SellerName`, `Name`, `Brand`, and `Category`; it supplies no EAN, UPC, ISBN, or manufacturer part number (MPN). `Id` identifies a seller's source offer, not a globally unique product. The combination of cleaned seller name and canonical source ID prevents duplicate offers; a repeated pair is rejected as a duplicate or, when its original content differs, a source-ID conflict. Upload `Idempotency-Key` identifies a request and is also not a product identifier.
+
+Automatic product matching requires equality of normalized **Brand + Name + Category**, including the narrowly scoped optional inch-marker rule above. Missing brand or category prevents matching: an otherwise valid item creates a separate product rather than guessing an identity. Valid unfamiliar brands and categories are preserved, not discarded. This deliberately favors a false negative (a duplicate product requiring later review) over a false positive (incorrectly joining distinct products and their seller offers). Generation and capacity differences such as Galaxy S22/S23 and iPhone 13 128GB/256GB remain significant and have consolidation regression tests. No fuzzy string-distance algorithm participates in automatic merging. A future fuzzy feature may suggest candidates to a human reviewer, but must not write product merges or seller reassociations without explicit review approval and an audit trail.
+
+If standard product identifiers are added, the proposed deterministic precedence is:
+
+1. Validated EAN/UPC, converted to a common barcode comparison key using an explicitly specified validation and equivalence policy.
+2. Validated ISBN, using an explicitly specified format/equivalence policy and preserving edition/format distinctions.
+3. An exact manufacturer-scoped MPN together with normalized brand; do not strip significant part-number punctuation.
+4. The current normalized Brand + Name + Category key, only when no standard identifier is supplied.
+
+This is a future policy, not implemented identifier support. A unique identifier match would take precedence over text similarity, but conflicting identifiers, multiple candidate products, or incompatible model/capacity evidence must stop automatic linking and go to review. A supplied invalid or unmatched identifier must not silently fall back to a text match; after validation, an unmatched identity may create a separate product. Before enabling this policy, extend the input/storage contracts and add tests for precedence, equivalent representations, identifier conflicts, manufacturer scoping, missing/invalid values, and preservation of distinct variants.
 
 ## Prerequisites
 
