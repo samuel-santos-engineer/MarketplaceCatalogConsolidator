@@ -9,6 +9,7 @@ public sealed class SqliteDatabaseMigrator : IDatabaseMigrator
 {
     private const string InitialMigrationId = "202609290001_InitialCatalogAndUploadSchema";
     private const string ReportFinalizationMigrationId = "202609290002_ReportFinalization";
+    private const string OptionalInchQuoteMigrationId = "202609290003_OptionalInchQuoteIdentity";
 
     public async Task MigrateAsync(string databasePath, CancellationToken cancellationToken = default)
     {
@@ -40,6 +41,51 @@ public sealed class SqliteDatabaseMigrator : IDatabaseMigrator
         }
 
         await ApplyReportFinalizationMigrationAsync(connection, cancellationToken).ConfigureAwait(false);
+        await ApplyOptionalInchQuoteMigrationAsync(connection, cancellationToken).ConfigureAwait(false);
+    }
+
+    private static async Task ApplyOptionalInchQuoteMigrationAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        await using var check = connection.CreateCommand();
+        check.CommandText = "SELECT COUNT(*) FROM SchemaMigration WHERE MigrationId = $id;";
+        check.Parameters.AddWithValue("$id", OptionalInchQuoteMigrationId);
+        if (Convert.ToInt64(await check.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false), CultureInfo.InvariantCulture) != 0)
+        {
+            return;
+        }
+
+        await using var transaction = connection.BeginTransaction();
+        await using var select = connection.CreateCommand();
+        select.Transaction = transaction;
+        select.CommandText = "SELECT Id, Name FROM Product;";
+        var products = new List<(long Id, string Name)>();
+        await using (var reader = await select.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+        {
+            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                products.Add((reader.GetInt64(0), reader.GetString(1)));
+            }
+        }
+
+        await using var update = connection.CreateCommand();
+        update.Transaction = transaction;
+        update.CommandText = "UPDATE Product SET NormalizedName = $name WHERE Id = $id;";
+        var nameParameter = update.Parameters.Add("$name", SqliteType.Text);
+        var idParameter = update.Parameters.Add("$id", SqliteType.Integer);
+        foreach (var product in products)
+        {
+            nameParameter.Value = TextNormalization.NormalizeProductNameForComparison(product.Name);
+            idParameter.Value = product.Id;
+            await update.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        await using var record = connection.CreateCommand();
+        record.Transaction = transaction;
+        record.CommandText = "INSERT INTO SchemaMigration (MigrationId, AppliedAtUtc) VALUES ($id, $at);";
+        record.Parameters.AddWithValue("$id", OptionalInchQuoteMigrationId);
+        record.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+        await record.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task ApplyReportFinalizationMigrationAsync(SqliteConnection connection, CancellationToken cancellationToken)
@@ -104,7 +150,7 @@ public sealed class SqliteDatabaseMigrator : IDatabaseMigrator
         var idParameter = updateCommand.Parameters.Add("$id", SqliteType.Integer);
         foreach (var product in products)
         {
-            nameParameter.Value = TextNormalization.NormalizeForComparison(product.Name);
+            nameParameter.Value = TextNormalization.NormalizeProductNameForComparison(product.Name);
             brandParameter.Value = product.Brand is null ? DBNull.Value : TextNormalization.NormalizeForComparison(product.Brand);
             categoryParameter.Value = product.Category is null ? DBNull.Value : TextNormalization.NormalizeForComparison(product.Category);
             idParameter.Value = product.Id;

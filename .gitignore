@@ -20,7 +20,7 @@ __pycache__/
 !*.example
 **/appsettings.Development.json
 
-# Runtime data; the supplied root catalog.db remains a tracked source asset
+# Runtime data; the supplied artifacts/catalog.db remains a tracked source asset
 /data/
 /home/data/
 /reports/
@@ -31,13 +31,17 @@ __pycache__/
 *.db.bak*
 *.sqlite
 *.sqlite3
-!/catalog.db
 *.sqlite-wal
 *.sqlite-shm
 
 # Test and build artifacts
 TestResults/
 artifacts/
+!artifacts/
+artifacts/*
+!artifacts/ProductEntry.json
+!artifacts/report-outcomes-baseline.json
+!artifacts/catalog.db
 coverage/
 *.trx
 *.log

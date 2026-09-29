@@ -80,7 +80,7 @@ public sealed class LabDatabaseResetTests
         Assert.Empty(Directory.GetFiles(fixture.Paths.ReportDirectory));
         Assert.Equal(0, await fixture.CountAsync("SELECT COUNT(*) FROM UploadItem;"));
         Assert.Equal(0, await fixture.CountAsync("SELECT COUNT(*) FROM Upload;"));
-        Assert.Equal(2, await fixture.CountAsync("SELECT COUNT(*) FROM SchemaMigration;"));
+        Assert.Equal(3, await fixture.CountAsync("SELECT COUNT(*) FROM SchemaMigration;"));
         using var ready = await fixture.Client.GetAsync("/api/v1/ready");
         Assert.Equal(HttpStatusCode.OK, ready.StatusCode);
         Assert.Equal(starterBytes, await File.ReadAllBytesAsync(fixture.Paths.StarterDatabasePath));
@@ -330,7 +330,7 @@ public sealed class LabDatabaseResetTests
             {
                 ["Security:ApiKey"] = Key,
                 ["Catalog:StorageRoot"] = Path.Combine(root, "data"),
-                ["Catalog:StarterDatabasePath"] = Path.Combine(AppContext.BaseDirectory, "catalog.db")
+                ["Catalog:StarterDatabasePath"] = Path.Combine(AppContext.BaseDirectory, "artifacts", "catalog.db")
             }));
             builder.ConfigureTestServices(services =>
             {

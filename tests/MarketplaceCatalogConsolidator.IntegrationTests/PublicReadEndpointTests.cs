@@ -345,7 +345,7 @@ public sealed class PublicReadEndpointTests
             {
                 ["Security:ApiKey"] = "test-read-api-key",
                 ["Catalog:StorageRoot"] = Path.Combine(root, "data"),
-                ["Catalog:StarterDatabasePath"] = Path.Combine(AppContext.BaseDirectory, "catalog.db")
+                ["Catalog:StarterDatabasePath"] = Path.Combine(AppContext.BaseDirectory, "artifacts", "catalog.db")
             }));
             builder.ConfigureTestServices(services =>
             {

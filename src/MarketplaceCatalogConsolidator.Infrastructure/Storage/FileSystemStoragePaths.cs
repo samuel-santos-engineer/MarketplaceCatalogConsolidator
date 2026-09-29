@@ -8,7 +8,7 @@ public sealed class FileSystemStoragePaths : IStoragePaths
     {
         options ??= CatalogStorageOptions.FromEnvironment();
         RootDirectory = Path.GetFullPath(options.StorageRoot ?? GetDefaultStorageRoot());
-        StarterDatabasePath = Path.GetFullPath(options.StarterDatabasePath ?? Path.Combine(AppContext.BaseDirectory, "catalog.db"));
+        StarterDatabasePath = Path.GetFullPath(options.StarterDatabasePath ?? Path.Combine(AppContext.BaseDirectory, "artifacts", "catalog.db"));
         WorkingDatabasePath = Path.Combine(RootDirectory, "catalog.db");
         UploadDirectory = Path.Combine(RootDirectory, "uploads");
         ReportDirectory = Path.Combine(RootDirectory, "reports");

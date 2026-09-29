@@ -15,6 +15,6 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1
 gitleaks dir . --config .gitleaks.toml --redact --no-banner
 ```
 
-On Linux, use `sh scripts/verify.sh`. CI parses its workflow as part of the tests, builds Release, runs all tests, verifies formatting, and scans both the checkout and Git history with Gitleaks. New tests must use disposable database/storage roots and preserve the starter `catalog.db`. Runtime data, local settings, keys, and generated output must never be committed.
+On Linux, use `sh scripts/verify.sh`. CI parses its workflow as part of the tests, builds Release, runs all tests, verifies formatting, and scans both the checkout and Git history with Gitleaks. New tests must use disposable database/storage roots and preserve the starter `artifacts/catalog.db`. Runtime data, local settings, keys, and generated output must never be committed.
 
 Keep changes within the agreed milestone. Docker image work and Azure deployment are reserved for the final deployment milestone. Business policy, matching, immutable reports, and migrations need explicit review when changed. Update the README and API documentation when behavior changes.

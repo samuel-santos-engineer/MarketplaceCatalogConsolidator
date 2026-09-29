@@ -13,7 +13,7 @@ public sealed class SqliteProductCatalog(SqliteConnectionFactory connectionFacto
         ArgumentNullException.ThrowIfNull(identity);
         await using var connection = await _connectionFactory.OpenConnectionAsync(cancellationToken).ConfigureAwait(false);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Id, Name, Brand, Category, NormalizedName, NormalizedBrand, NormalizedCategory FROM Product WHERE NormalizedBrand = $brand AND NormalizedName = $name AND NormalizedCategory = $category LIMIT 1;";
+        command.CommandText = "SELECT Id, Name, Brand, Category, NormalizedName, NormalizedBrand, NormalizedCategory FROM Product WHERE NormalizedBrand = $brand AND NormalizedName = $name AND NormalizedCategory = $category ORDER BY Id LIMIT 1;";
         command.Parameters.AddWithValue("$brand", identity.NormalizedBrand);
         command.Parameters.AddWithValue("$name", identity.NormalizedName);
         command.Parameters.AddWithValue("$category", identity.NormalizedCategory);
@@ -42,7 +42,7 @@ public sealed class SqliteProductCatalog(SqliteConnectionFactory connectionFacto
         command.Parameters.AddWithValue("$name", product.Name);
         command.Parameters.AddWithValue("$brand", (object?)product.Brand ?? DBNull.Value);
         command.Parameters.AddWithValue("$category", (object?)product.Category ?? DBNull.Value);
-        command.Parameters.AddWithValue("$normalizedName", product.NormalizedName);
+        command.Parameters.AddWithValue("$normalizedName", TextNormalization.NormalizeProductNameForComparison(product.Name));
         command.Parameters.AddWithValue("$normalizedBrand", (object?)product.NormalizedBrand ?? DBNull.Value);
         command.Parameters.AddWithValue("$normalizedCategory", (object?)product.NormalizedCategory ?? DBNull.Value);
         var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);

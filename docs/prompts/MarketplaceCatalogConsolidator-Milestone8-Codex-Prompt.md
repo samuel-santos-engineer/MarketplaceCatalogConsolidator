@@ -36,11 +36,11 @@ There must be no unversioned, `v1`, GET, or anonymous reset route.
 
 ## Required reset semantics
 
-“Original state” means the immutable source `catalog.db` data is copied again into a fresh **working** database and then the normal forward migrations are reapplied. It does **not** mean bypassing the application schema migrations.
+“Original state” means the immutable source `artifacts/catalog.db` data is copied again into a fresh **working** database and then the normal forward migrations are reapplied. It does **not** mean bypassing the application schema migrations.
 
 After a successful reset:
 
-- the repository’s immutable root `catalog.db` is unchanged;
+- the repository’s immutable `artifacts/catalog.db` is unchanged;
 - the working database contains the starter catalog (975 `Product` rows) and no seller-product links;
 - upload records, upload-item outcomes, idempotency records, generated reports, and staged upload files from previous demonstrations no longer exist;
 - normal startup/bootstrap/migration invariants still hold and `/api/v1/ready` is healthy;
@@ -82,7 +82,7 @@ At minimum prove:
 6. A new upload can be accepted and processed after reset.
 7. Repeating reset yields the same clean baseline.
 8. A real concurrent reset/upload (and, if practical, reset/reset) cannot corrupt SQLite or leave partial files. Assert the selected documented contention response/behavior.
-9. The immutable starter `catalog.db` checksum or byte contents remain unchanged.
+9. The immutable starter `artifacts/catalog.db` checksum or byte contents remain unchanged.
 
 Keep the existing full test suite green. Update or add contract tests without weakening prior assertions.
 

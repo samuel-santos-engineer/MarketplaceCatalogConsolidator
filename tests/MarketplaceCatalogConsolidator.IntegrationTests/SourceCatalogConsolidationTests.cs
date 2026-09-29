@@ -11,6 +11,47 @@ namespace MarketplaceCatalogConsolidator.IntegrationTests;
 
 public sealed class SourceCatalogConsolidationTests
 {
+    [Fact]
+    public async Task SuppliedInputFromFreshStarterMatchesBaselineOutcomesExactly()
+    {
+        var projectRoot = new DirectoryInfo(AppContext.BaseDirectory);
+        while (projectRoot is not null && !File.Exists(Path.Combine(projectRoot.FullName, "MarketplaceCatalogConsolidator.sln")))
+        {
+            projectRoot = projectRoot.Parent;
+        }
+
+        Assert.NotNull(projectRoot);
+        var starterPath = Path.Combine(projectRoot.FullName, "artifacts", "catalog.db");
+        var starterBefore = await File.ReadAllBytesAsync(starterPath);
+        var input = await File.ReadAllTextAsync(Path.Combine(projectRoot.FullName, "artifacts", "ProductEntry.json"));
+        using var source = JsonDocument.Parse(input);
+        using var baseline = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(projectRoot.FullName, "artifacts", "report-outcomes-baseline.json")));
+
+        // A new isolated working database is bootstrapped from the original before every run.
+        using var fixture = new ConsolidationFixture(starterPath);
+        Assert.Equal(975, await fixture.CountAsync("SELECT COUNT(*) FROM Product;"));
+        Assert.Equal(0, await fixture.CountAsync("SELECT COUNT(*) FROM SellerProduct;"));
+        var upload = await fixture.CreateQueuedUploadAsync(input, source.RootElement.GetArrayLength());
+        var reportStore = new FileSystemReportFileStore(fixture.Paths);
+        var workflow = new ConsolidationWorkflow(fixture.UploadStore, fixture.ItemStore, fixture.Processor,
+            new FileSystemWorkflowLock(fixture.Paths),
+            new UploadReportFinalizationService(fixture.UploadStore, fixture.ItemStore, reportStore));
+
+        Assert.True(await workflow.ProcessNextAsync());
+        await using var stream = await reportStore.OpenReadAsync(upload.Id);
+        using var actual = await JsonDocument.ParseAsync(stream);
+        // Only run metadata varies; every item field and action string must match exactly.
+        foreach (var property in new[] { "status", "summary", "failureCode", "failureMessage", "items" })
+        {
+            Assert.Equal(JsonSerializer.Serialize(baseline.RootElement.GetProperty(property)),
+                JsonSerializer.Serialize(actual.RootElement.GetProperty(property)));
+        }
+
+        Assert.Equal(982, await fixture.CountAsync("SELECT COUNT(*) FROM Product;"));
+        Assert.Equal(265, await fixture.CountAsync("SELECT COUNT(*) FROM SellerProduct;"));
+        Assert.Equal(starterBefore, await File.ReadAllBytesAsync(starterPath));
+    }
+
     [Theory]
     [InlineData("Smartphone  Galaxy S23")]
     [InlineData("Smartphone \u00a0Galaxy S23")]
@@ -122,7 +163,7 @@ public sealed class SourceCatalogConsolidationTests
     }
 
     [Fact]
-    public async Task MonitorNonAsciiQuoteCleanupAppearsInFinalReportAndSummary()
+    public async Task MonitorUnicodeQuoteRemainsApprovedInFinalReportAndSummary()
     {
         using var fixture = new ConsolidationFixture();
         const string sourceId = "a7b8c9d0-e1f2-4a5b-4c5d-6e7f8a9b0c1d";
@@ -139,14 +180,14 @@ public sealed class SourceCatalogConsolidationTests
 
         var completed = await fixture.UploadStore.FindByIdAsync(upload.Id);
         Assert.NotNull(completed);
-        Assert.Equal(1, completed.CleanedCount);
-        Assert.Equal(0, completed.ApprovedCount);
+        Assert.Equal(0, completed.CleanedCount);
+        Assert.Equal(1, completed.ApprovedCount);
         await using var stream = await reportStore.OpenReadAsync(upload.Id);
         using var report = await JsonDocument.ParseAsync(stream);
         var item = report.RootElement.GetProperty("items")[0];
         Assert.Equal(sourceId, item.GetProperty("id").GetString());
-        Assert.Equal("Cleaned", item.GetProperty("status").GetString());
-        Assert.Equal("Monitor LG UltraWide 34", item.GetProperty("cleanedName").GetString());
+        Assert.Equal("Approved", item.GetProperty("status").GetString());
+        Assert.Equal("Monitor LG UltraWide 34\u201d", item.GetProperty("cleanedName").GetString());
         Assert.Equal("Monitor LG UltraWide 34\u201d", item.GetProperty("name").GetString());
     }
 
@@ -210,6 +251,46 @@ public sealed class SourceCatalogConsolidationTests
         Assert.Contains($"Created Product {result.MatchedProductId}", result.ActionTaken, StringComparison.Ordinal);
         Assert.Equal(1, await fixture.CountAsync("SELECT COUNT(*) FROM SellerProduct WHERE SellerName = $seller AND ProductId = $productId;", ("$seller", "NewSeller"), ("$productId", result.MatchedProductId!.Value)));
         Assert.Equal(name, await fixture.ReadProductNameAsync(result.MatchedProductId.Value));
+    }
+
+    [Theory]
+    [InlineData("AB\u201312")]
+    [InlineData("AB\u201412")]
+    public async Task UnicodeDashDoesNotMergeWithPunctuationFreeModel(string name)
+    {
+        using var fixture = new ConsolidationFixture();
+        var existingId = await fixture.EnsureProductAsync("AB12", "ModelBrand", "ModelCategory");
+        var beforeCount = await fixture.CountAsync("SELECT COUNT(*) FROM Product;");
+
+        var result = await fixture.ProcessAsync(Source("ModelSeller", name, "ModelBrand", "ModelCategory"));
+
+        Assert.Equal(UploadItemStatus.Approved, result.Status);
+        Assert.Equal(name, result.CleanedName);
+        Assert.NotNull(result.MatchedProductId);
+        Assert.NotEqual(existingId, result.MatchedProductId.Value);
+        Assert.Equal(beforeCount + 1, await fixture.CountAsync("SELECT COUNT(*) FROM Product;"));
+        Assert.Equal(1, await fixture.CountAsync("SELECT COUNT(*) FROM SellerProduct WHERE SellerName = $seller AND ProductId = $productId;",
+            ("$seller", "ModelSeller"), ("$productId", result.MatchedProductId.Value)));
+    }
+
+    [Theory]
+    [InlineData("Tablet iPad Pro 12.9\"", "Tablet iPad Pro 12.9")]
+    [InlineData("Optional Model 34", "Optional Model 34\"")]
+    public async Task OptionalInchQuoteLinksExistingProductWithoutChangingDisplayOrStatus(string canonicalName, string sourceName)
+    {
+        using var fixture = new ConsolidationFixture();
+        var canonicalId = await fixture.EnsureProductAsync(canonicalName, "Apple", "Tablets");
+        var beforeCount = await fixture.CountAsync("SELECT COUNT(*) FROM Product;");
+
+        var result = await fixture.ProcessAsync(Source("InchSeller", sourceName, "Apple", "Tablets"));
+
+        Assert.Equal(UploadItemStatus.Approved, result.Status);
+        Assert.Equal(canonicalId, result.MatchedProductId);
+        Assert.Equal(sourceName, result.CleanedName);
+        Assert.Equal(canonicalName, await fixture.ReadProductNameAsync(canonicalId));
+        Assert.Equal(beforeCount, await fixture.CountAsync("SELECT COUNT(*) FROM Product;"));
+        Assert.Equal(1, await fixture.CountAsync("SELECT COUNT(*) FROM SellerProduct WHERE SellerName = $seller AND ProductId = $productId;",
+            ("$seller", "InchSeller"), ("$productId", canonicalId)));
     }
 
     [Theory]
@@ -380,10 +461,10 @@ public sealed class SourceCatalogConsolidationTests
         private readonly string _temporaryDirectory = Path.Combine(Path.GetTempPath(), $"marketplace-consolidation-tests-{Guid.NewGuid():N}");
         private readonly SqliteConnectionFactory _connectionFactory;
 
-        public ConsolidationFixture()
+        public ConsolidationFixture(string? originalStarterPath = null)
         {
             Directory.CreateDirectory(_temporaryDirectory);
-            var starterPath = Path.Combine(AppContext.BaseDirectory, "catalog.db");
+            var starterPath = originalStarterPath ?? Path.Combine(AppContext.BaseDirectory, "artifacts", "catalog.db");
             Paths = new FileSystemStoragePaths(new CatalogStorageOptions(Path.Combine(_temporaryDirectory, "data"), starterPath));
             var workingPath = new SqliteWorkingDatabaseBootstrapper(Paths).EnsureWorkingDatabaseAsync().GetAwaiter().GetResult();
             new SqliteDatabaseMigrator().MigrateAsync(workingPath).GetAwaiter().GetResult();
@@ -404,7 +485,7 @@ public sealed class SourceCatalogConsolidationTests
         public async Task<long> EnsureProductAsync(string name, string brand, string category)
         {
             var normalizedBrand = TextNormalization.NormalizeForComparison(brand);
-            var normalizedName = TextNormalization.NormalizeForComparison(name);
+            var normalizedName = TextNormalization.NormalizeProductNameForComparison(name);
             var normalizedCategory = TextNormalization.NormalizeForComparison(category);
             var existing = await ReadNullableInt64Async(
                 "SELECT Id FROM Product WHERE NormalizedBrand = $brand AND NormalizedName = $name AND NormalizedCategory = $category LIMIT 1;",
@@ -441,8 +522,8 @@ public sealed class SourceCatalogConsolidationTests
             return results;
         }
 
-        public Task<UploadRecord> CreateQueuedUploadAsync(string json) =>
-            CreateUploadAsync(json, 1, UploadStatus.Queued);
+        public Task<UploadRecord> CreateQueuedUploadAsync(string json, int receivedCount = 1) =>
+            CreateUploadAsync(json, receivedCount, UploadStatus.Queued);
 
         private async Task<UploadRecord> CreateUploadAsync(string json, int receivedCount, UploadStatus status)
         {

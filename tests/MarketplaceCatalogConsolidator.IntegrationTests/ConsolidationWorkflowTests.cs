@@ -229,7 +229,7 @@ public sealed class ConsolidationWorkflowTests
         public WorkflowFixture()
         {
             Directory.CreateDirectory(_temporaryDirectory);
-            var starterPath = Path.Combine(AppContext.BaseDirectory, "catalog.db");
+            var starterPath = Path.Combine(AppContext.BaseDirectory, "artifacts", "catalog.db");
             Paths = new FileSystemStoragePaths(new CatalogStorageOptions(Path.Combine(_temporaryDirectory, "data"), starterPath));
             var workingPath = new SqliteWorkingDatabaseBootstrapper(Paths).EnsureWorkingDatabaseAsync().GetAwaiter().GetResult();
             new SqliteDatabaseMigrator().MigrateAsync(workingPath).GetAwaiter().GetResult();
