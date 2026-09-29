@@ -1,7 +1,5 @@
 using System.Buffers;
 using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
 using MarketplaceCatalogConsolidator.Api.Contracts;
 using MarketplaceCatalogConsolidator.Api.Operations;
 using MarketplaceCatalogConsolidator.Application.Uploads;
@@ -27,6 +25,7 @@ internal static class UploadEndpoints
             .Produces<ApiErrorResponse>(StatusCodes.Status415UnsupportedMediaType)
             .Produces<ApiErrorResponse>(StatusCodes.Status429TooManyRequests)
             .Produces<ApiErrorResponse>(StatusCodes.Status500InternalServerError)
+            .Produces<ApiErrorResponse>(StatusCodes.Status503ServiceUnavailable)
             .Produces<ApiErrorResponse>(StatusCodes.Status507InsufficientStorage)
             .WithName("UploadCatalog")
             .WithSummary("Accept a product catalog JSON file")
@@ -110,7 +109,7 @@ internal static class UploadEndpoints
         CancellationToken cancellationToken)
     {
         var traceId = Guid.NewGuid().ToString("D");
-        if (!ApiKeyMatches(apiKeyHeader, configuration["Security:ApiKey"]))
+        if (!ApiKeyAuthentication.Matches(apiKeyHeader, configuration["Security:ApiKey"]))
         {
             return Error(traceId, StatusCodes.Status401Unauthorized, "unauthorized", "A valid API key is required.");
         }
@@ -301,18 +300,6 @@ internal static class UploadEndpoints
         {
             ArrayPool<byte>.Shared.Return(buffer);
         }
-    }
-
-    private static bool ApiKeyMatches(string? suppliedKey, string? configuredKey)
-    {
-        if (string.IsNullOrEmpty(configuredKey))
-        {
-            return false;
-        }
-
-        var expectedHash = SHA256.HashData(Encoding.UTF8.GetBytes(configuredKey));
-        var suppliedHash = SHA256.HashData(Encoding.UTF8.GetBytes(suppliedKey ?? string.Empty));
-        return CryptographicOperations.FixedTimeEquals(expectedHash, suppliedHash);
     }
 
     private static bool TryParseVersion4(string? value, out Guid key)

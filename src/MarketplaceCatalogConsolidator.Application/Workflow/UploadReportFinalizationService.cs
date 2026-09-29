@@ -12,7 +12,8 @@ public sealed class UploadReportFinalizationService(
     IUploadStore uploadStore,
     IUploadItemStore itemStore,
     IReportFileStore reportFileStore,
-    IStagingFileStore? stagingFileStore = null)
+    IStagingFileStore? stagingFileStore = null,
+    IWorkflowLock? workflowLock = null)
 {
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
@@ -26,6 +27,12 @@ public sealed class UploadReportFinalizationService(
     private readonly IStagingFileStore? _stagingFileStore = stagingFileStore;
 
     public async Task<bool> FinalizeAsync(Guid uploadId, CancellationToken cancellationToken = default)
+    {
+        await using var lease = workflowLock is null ? null : await workflowLock.AcquireAsync(cancellationToken).ConfigureAwait(false);
+        return await FinalizeUnderGateAsync(uploadId, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal async Task<bool> FinalizeUnderGateAsync(Guid uploadId, CancellationToken cancellationToken = default)
     {
         var upload = await _uploadStore.FindByIdAsync(uploadId, cancellationToken).ConfigureAwait(false)
             ?? throw new KeyNotFoundException($"Upload '{uploadId:D}' does not exist.");

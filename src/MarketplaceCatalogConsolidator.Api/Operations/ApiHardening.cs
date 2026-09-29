@@ -91,6 +91,16 @@ public static class ApiHardening
         app.UseRateLimiter();
         app.Use(async (context, next) =>
         {
+            if (HttpMethods.IsGet(context.Request.Method) && context.Request.Path.StartsWithSegments("/api/v1")
+                && context.Request.Path != "/api/v1/health")
+            {
+                await using var lease = await context.RequestServices.GetRequiredService<IWorkflowLock>().AcquireAsync(context.RequestAborted);
+                await next(context);
+            }
+            else await next(context);
+        });
+        app.Use(async (context, next) =>
+        {
             if (!HttpMethods.IsPost(context.Request.Method) || context.Request.Path != "/api/v1/uploads")
             {
                 await next(context);
@@ -124,10 +134,11 @@ internal sealed class SafeExceptionHandler(ILogger<SafeExceptionHandler> logger)
     {
         var traceId = Guid.NewGuid().ToString("D");
         var tooLarge = exception is BadHttpRequestException { StatusCode: 413 };
+        var maintenance = exception is MaintenanceUnavailableException;
         logger.LogError("Request failed with {ExceptionType}, trace {TraceId}", exception.GetType().Name, traceId);
-        context.Response.StatusCode = tooLarge ? 413 : 500;
-        await context.Response.WriteAsJsonAsync(new ApiErrorResponse(traceId, tooLarge ? "payload_too_large" : "internal_error",
-            tooLarge ? "The upload request is too large." : "The request could not be completed."), cancellationToken);
+        context.Response.StatusCode = tooLarge ? 413 : maintenance ? 503 : 500;
+        await context.Response.WriteAsJsonAsync(new ApiErrorResponse(traceId, tooLarge ? "payload_too_large" : maintenance ? "maintenance_unavailable" : "internal_error",
+            tooLarge ? "The upload request is too large." : maintenance ? "Storage maintenance has not completed." : "The request could not be completed."), cancellationToken);
         return true;
     }
 }

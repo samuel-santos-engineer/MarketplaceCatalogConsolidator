@@ -2,14 +2,14 @@
 
 # Marketplace Catalog Consolidator
 
-[![Milestone](https://img.shields.io/badge/milestone-7-blue)](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/milestones)
-[![Tests](https://img.shields.io/badge/tests-126%20passing-brightgreen)](tests)
+[![Milestone](https://img.shields.io/badge/milestone-8-blue)](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/milestones)
+[![Tests](https://img.shields.io/badge/tests-144%20passing-brightgreen)](tests)
 [![CI](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/actions/workflows/ci.yml)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![Docker](https://img.shields.io/badge/Docker-containerized-2496ED?logo=docker)](Dockerfile)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-Marketplace Catalog Consolidator is a .NET 10 API for consolidating seller product catalogs into a canonical SQLite catalog. The project is being delivered incrementally against [the solution design](docs/MarketplaceCatalogConsolidator-Solution-Design.md). Milestone 7 includes authenticated uploads, public read APIs and Swagger, operational hardening, and repository governance. Docker/Azure work is reserved for the final deployment milestone.
+Marketplace Catalog Consolidator is a .NET 10 API for consolidating seller product catalogs into a canonical SQLite catalog. The project is being delivered incrementally against [the solution design](docs/MarketplaceCatalogConsolidator-Solution-Design.md). Milestone 8 adds authenticated lab reset to the existing upload, public read, Swagger, and operational features. Docker/Azure work is reserved for the final deployment milestone.
 
 ## Architecture
 
@@ -24,7 +24,7 @@ The API project is the composition root and may reference Infrastructure for dep
 
 ## Current status
 
-The solution targets `net10.0` and includes API, Application, Domain, Infrastructure, UnitTests, and IntegrationTests projects. The API exposes the seven versioned routes documented below. Startup copies the starter database if needed, applies migrations, recovers interrupted uploads, cleans stale report temp files, and resumes pending report finalizations before running the host. One hosted consolidation worker polls at a bounded interval and uses a data-root file lock plus an atomic SQLite claim to serialize uploads across loops and service instances sharing that persistent root. The production item processor parses staged UTF-8 JSON, validates and cleans source entries, resolves canonical brands/categories, strictly matches products, writes seller offers, and commits each item outcome atomically with its catalog changes. Terminal outcomes are persisted only after an immutable report is published and verified.
+The solution targets `net10.0` and includes API, Application, Domain, Infrastructure, UnitTests, and IntegrationTests projects. The API exposes eight versioned routes documented below. Startup initializes storage under the shared workflow gate, completes any interrupted lab reset, applies migrations, recovers interrupted uploads, and resumes pending report finalizations before running the host. One hosted consolidation worker polls at a bounded interval and uses the data-root gate plus an atomic SQLite claim to serialize work across service instances sharing that root. The production item processor validates and cleans source entries, preserves valid brand/category values, strictly matches products, writes seller offers, and commits each item outcome atomically with its catalog changes. Terminal outcomes are persisted only after an immutable report is published and verified.
 
 The root `catalog.db` is an immutable assessment input and must remain unchanged. Bootstrap copies it to a separate working database before migration. The supplied database has 975 `Product` rows and no `SellerProduct` links; migration preserves legacy seller rows and changes `SellerProduct.SellerProductId` to `TEXT NOT NULL`. For seller rows from older schemas, newly required audit fields unavailable in the source are marked with a deterministic `legacy:<row-id>` fingerprint and the Unix epoch timestamp. Migration history is stored in `SchemaMigration`, and product identity keys are normalized for matching. `ProductEntry.json` contains 269 entries.
 
@@ -65,9 +65,28 @@ dotnet run --project src/MarketplaceCatalogConsolidator.Api
 
 Swagger UI is public at `/swagger/`; the OpenAPI document is at `/openapi/v1.json`. `POST /api/v1/uploads` accepts exactly one `file` part containing a UTF-8 JSON array, strictly smaller than 500,000 bytes, and requires `Idempotency-Key` (UUID v4) plus `X-Api-Key`. The API key is supplied through `Security__ApiKey` configuration/environment only and is compared in constant time. A newly accepted upload returns `202 Accepted` with upload ID, current status, display filename, SHA-256, and a `Location` header pointing to the live `/api/v1/uploads/{uploadId}/status` endpoint. Missing or invalid credentials return the same `401` response. Invalid multipart/JSON or idempotency headers return `400`, content types other than multipart return `415`, oversized files return `413`, and a reused idempotency key with different bytes returns `409`. Every error has `traceId`, `code`, and `message`. Repeating a key with identical bytes returns the same upload. The background worker handles accepted uploads and writes their immutable report. Do not commit local environment files or secret-bearing settings.
 
+## Destructive lab reset (Milestone 8)
+
+`POST /api/v2/reset-database` is an authenticated lab-only operation that permanently removes upload history/outcomes, idempotency records, staged files, reports, and seller links. It copies the immutable starter catalog into the working database and reapplies normal migrations, restoring 975 products and zero seller links. The running service remains usable, readiness returns healthy, and a new upload can be accepted immediately. Production deployment must disable/remove this endpoint or require a separate intentional production decision; this milestone does not authorize production use.
+
+For local Development only, with the placeholder convention above explicitly enabled:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri 'http://localhost:5254/api/v2/reset-database' -Headers @{
+    'X-Api-Key' = 'development-only-not-a-secret'
+    'X-Reset-Confirmation' = 'RESET_DATABASE'
+}
+```
+
+Send no body. `X-Reset-Confirmation` must equal `RESET_DATABASE` exactly, including case. Missing/invalid authentication returns `401 unauthorized`; missing/wrong confirmation returns `400 reset_not_confirmed`; a non-empty body (including chunked input) returns `400 invalid_request_body`. The response is `200` with `resetAtUtc`, `productCount: 975`, and `sellerProductCount: 0`. Reset shares the upload mutation rate-limit bucket (5 requests/minute/peer, `429` on excess), never the public-read bucket. Global body limits and safe `500`/`503` error envelopes remain in effect.
+
+Worker processing, upload persistence/staging, report publication, startup initialization, storage reads, and reset cooperate through the existing exclusive data-root workflow gate. Reset waits for in-flight work to finish; operations arriving during reset wait, then act on the clean state. Uploads accepted before a completed reset are intentionally erased; uploads waiting behind it are accepted into the clean database. Request cancellation cancels waiting, but once destructive mutation begins initialization finishes independently of a client disconnect. A failed reset returns `503 reset_failed`, retains a durable recovery marker, makes readiness and uploads return `503 maintenance_unavailable`, and keeps the host/worker alive. Retrying reset or restarting redoes initialization before normal work resumes.
+
+Use this endpoint instead of deleting a running service's storage folder: it preserves the working root and held lock artifact, cleans SQLite sidecars and managed flat staging/report directories under the gate, preserves the starter database, and applies migrations before success. Unexpected nested/linked artifact directories fail closed. Existing downloaded reports are not rewritten. Swagger documents only the versioned POST and both required headers, with no secret example.
+
 ## Public read API (Milestone 6)
 
-All GET routes below are public and require no API-key header. In Swagger, expand a GET operation and select **Try it out**; only the POST needs credentials.
+All GET routes below are public and require no API-key header. In Swagger, expand a GET operation and select **Try it out**; both upload and lab-reset POST operations need credentials.
 
 
 | Route | Queries and response |

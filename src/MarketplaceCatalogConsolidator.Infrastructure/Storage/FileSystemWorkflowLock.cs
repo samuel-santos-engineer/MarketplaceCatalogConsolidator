@@ -8,7 +8,11 @@ public sealed class FileSystemWorkflowLock(IStoragePaths paths) : IWorkflowLock
         (paths ?? throw new ArgumentNullException(nameof(paths))).RootDirectory,
         ".consolidation.lock");
 
-    public async Task<IAsyncDisposable> AcquireAsync(CancellationToken cancellationToken = default)
+    public Task<IAsyncDisposable> AcquireAsync(CancellationToken cancellationToken = default) => AcquireCoreAsync(false, cancellationToken);
+
+    public Task<IAsyncDisposable> AcquireMaintenanceAsync(CancellationToken cancellationToken = default) => AcquireCoreAsync(true, cancellationToken);
+
+    private async Task<IAsyncDisposable> AcquireCoreAsync(bool maintenance, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_lockPath)!);
         var retryDelay = TimeSpan.FromMilliseconds(50);
@@ -18,13 +22,19 @@ public sealed class FileSystemWorkflowLock(IStoragePaths paths) : IWorkflowLock
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                return new FileStream(
+                var lease = new FileStream(
                     _lockPath,
                     FileMode.OpenOrCreate,
                     FileAccess.ReadWrite,
                     FileShare.None,
                     bufferSize: 1,
                     FileOptions.Asynchronous);
+                if (!maintenance && File.Exists(Path.Combine(Path.GetDirectoryName(_lockPath)!, ".lab-reset-pending")))
+                {
+                    await lease.DisposeAsync().ConfigureAwait(false);
+                    throw new MaintenanceUnavailableException();
+                }
+                return lease;
             }
             catch (IOException)
             {

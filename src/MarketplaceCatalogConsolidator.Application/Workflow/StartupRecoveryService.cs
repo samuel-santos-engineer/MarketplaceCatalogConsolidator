@@ -20,7 +20,7 @@ public sealed class StartupRecoveryService(IUploadStore uploadStore, IWorkflowLo
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                await _reportFinalizationService.FinalizeAsync(upload.Id, cancellationToken).ConfigureAwait(false);
+                await _reportFinalizationService.FinalizeUnderGateAsync(upload.Id, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {

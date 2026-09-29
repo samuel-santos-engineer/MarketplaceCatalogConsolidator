@@ -28,6 +28,14 @@ flowchart TD
 
 ## 3. API contract
 
+### Milestone 8: lab reset
+
+Only `POST /api/v2/reset-database` resets storage. Require existing `X-Api-Key` authentication, exact case-sensitive `X-Reset-Confirmation: RESET_DATABASE`, and an empty body. Use the same mutation rate-limit bucket as uploads. Return `200` only after a fresh working copy of the immutable starter is migrated and verified (975 products, zero seller links), with `resetAtUtc`, `productCount`, and `sellerProductCount`. Errors are safe envelopes: `401 unauthorized`, `400 reset_not_confirmed`/`invalid_request_body`, global `413`, `429 rate_limit_exceeded`, `500 internal_error`, or `503 reset_failed`. OpenAPI documents both headers and the destructive lab-only consequence without credentials.
+
+`ILabDatabaseResetService` orchestrates the existing data-root workflow gate; `ILabDatabaseResetStorage` owns filesystem/SQLite mechanics. Upload acceptance, worker transactions, report finalization, startup bootstrap/migrations/recovery, storage reads, and reset all cooperate. Competing work waits, then operates on the new state; active worker work finishes before reset proceeds. Normal requests honor cancellation while waiting; reset initialization completes independently of client disconnect once mutation starts. Clean only the managed working database/sidecars and flat staging/report directories. Preserve the root, gate artifact, and starter database. Validated targets must remain under the working root and exclude the starter. Linked/nested artifact directories fail closed.
+
+A durable pending-reset marker blocks normal work and readiness after failure. The worker continues polling without stopping the host. Retrying reset or startup under the same gate restores a fresh migrated baseline and clears the marker only after verification. Upload history, item outcomes, idempotency records, reports, and staged inputs are removed. Unlike manually deleting a live storage folder, reset protects in-flight operations and preserves startup invariants. Production deployment must disable/remove the endpoint or make a separate intentional production decision. Local Development may use only the explicitly enabled public placeholder. The former duplicate root solution-design copy was consolidated into this document; keep documentation under `docs` except the root README.
+
 Every REST endpoint uses URL-segment versioning. The initial release is `v1`; breaking changes introduce `v2` without changing `v1` behavior.
 
 

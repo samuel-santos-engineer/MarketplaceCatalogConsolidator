@@ -10,7 +10,8 @@ public sealed class UploadAcceptanceService(
     IUploadStore uploadStore,
     IStagingFileStore stagingFileStore,
     IReportFileStore reportFileStore,
-    SourceDocumentParser parser)
+    SourceDocumentParser parser,
+    IWorkflowLock? workflowLock = null)
 {
     public const int MaximumFileSizeBytes = 500_000;
 
@@ -59,6 +60,7 @@ public sealed class UploadAcceptanceService(
             throw new UploadAcceptanceException(UploadAcceptanceFailure.InvalidJson, exception.Message, exception);
         }
 
+        await using var lease = workflowLock is null ? null : await workflowLock.AcquireAsync(cancellationToken).ConfigureAwait(false);
         var fileHash = Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant();
         var existing = await _uploadStore.FindByIdempotencyKeyAsync(idempotencyKey, cancellationToken).ConfigureAwait(false);
         if (existing is not null)

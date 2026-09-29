@@ -33,3 +33,10 @@ GET {{baseUrl}}/api/v1/health
 
 ### Storage/database readiness
 GET {{baseUrl}}/api/v1/ready
+
+### DESTRUCTIVE lab reset: removes all prior uploads/reports/offers; no body
+# The public placeholder below is only accepted in explicitly enabled local Development.
+# Production must disable/remove reset or make a separate intentional decision.
+POST {{baseUrl}}/api/v2/reset-database
+X-Api-Key: development-only-not-a-secret
+X-Reset-Confirmation: RESET_DATABASE
