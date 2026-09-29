@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Submit marketplace catalog uploads and inspect immutable reports.">
+  <title>Uploads | Marketplace Catalog Consolidator</title>
+  <link rel="stylesheet" href="/css/catalog-ui.css">
+  <script src="/js/uploads-ui.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/">Marketplace Catalog</a>
+    <nav aria-label="Primary navigation">
+      <a href="/">Products</a>
+      <a href="/uploads.html" aria-current="page">Uploads</a>
+      <a href="/swagger/">Swagger</a>
+    </nav>
+  </header>
+
+  <main class="page-shell">
+    <section class="hero" aria-labelledby="page-title">
+      <p class="eyebrow">Import workflow</p>
+      <h1 id="page-title">Uploads</h1>
+      <p>Submit one catalog file, follow its durable status, and inspect the immutable outcome report.</p>
+    </section>
+
+    <section class="card" aria-labelledby="upload-title">
+      <div class="section-heading"><div><p class="eyebrow">Authenticated write</p><h2 id="upload-title">Upload catalog JSON</h2></div></div>
+      <form id="upload-form" class="upload-grid">
+        <label>JSON file
+          <input id="upload-file" name="file" type="file" accept=".json,application/json" required>
+          <span class="field-help">One UTF-8 JSON array file, strictly smaller than 500,000 bytes.</span>
+        </label>
+        <label>API key
+          <input id="api-key" type="password" autocomplete="off" required>
+          <span class="field-help">Used for this upload only and never persisted by this page.</span>
+        </label>
+        <label>Idempotency key
+          <input id="idempotency-key" type="text" readonly aria-describedby="idempotency-help">
+          <span id="idempotency-help" class="field-help">A fresh UUID v4 lets the same request retry safely.</span>
+        </label>
+        <div class="form-actions">
+          <button type="submit">Upload file</button>
+          <button id="regenerate-key" type="button" class="button-secondary">New key</button>
+          <button id="copy-key" type="button" class="button-secondary">Copy key</button>
+        </div>
+      </form>
+      <div id="upload-result" class="notice" role="status" aria-live="polite" hidden></div>
+    </section>
+
+    <section class="card" aria-labelledby="attempts-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">Durable history</p><h2 id="attempts-title">Upload attempts</h2></div>
+        <p id="uploads-status" class="status-message" role="status" aria-live="polite"></p>
+      </div>
+      <form id="uploads-filter" class="inline-filters">
+        <label>Status
+          <select id="status-filter" name="status">
+            <option value="">All statuses</option>
+            <option value="Queued">Queued</option>
+            <option value="Processing">Processing</option>
+            <option value="ReportPending">Report pending</option>
+            <option value="Completed">Completed</option>
+            <option value="CompletedWithRejections">Completed with rejections</option>
+            <option value="Failed">Failed</option>
+          </select>
+        </label>
+        <label>Page size
+          <select id="uploads-page-size" name="pageSize"><option>10</option><option selected>25</option><option>50</option><option>100</option></select>
+        </label>
+        <button type="submit">Apply</button>
+      </form>
+      <div id="uploads-table-wrap" class="table-wrap" aria-busy="false">
+        <table>
+          <caption class="visually-hidden">Upload attempts and report availability</caption>
+          <thead><tr><th scope="col">Upload</th><th scope="col">Status</th><th scope="col">Timing</th><th scope="col">Outcomes</th><th scope="col">Links</th></tr></thead>
+          <tbody id="uploads-rows"></tbody>
+        </table>
+      </div>
+      <p id="uploads-empty" class="empty-state" hidden>No upload attempts match this filter.</p>
+      <div class="pagination" aria-label="Upload pagination">
+        <button id="uploads-previous" type="button" class="button-secondary">Previous</button>
+        <span id="uploads-page">Page 1</span>
+        <button id="uploads-next" type="button" class="button-secondary">Next</button>
+      </div>
+    </section>
+
+    <section id="report-panel" class="card" aria-labelledby="report-title" hidden>
+      <div class="section-heading">
+        <div><p class="eyebrow">Immutable evidence</p><h2 id="report-title">Selected report</h2></div>
+        <a href="/uploads.html" class="text-link">Close report</a>
+      </div>
+      <div id="report-status" class="notice" role="status" aria-live="polite"></div>
+      <div id="report-content" hidden>
+        <dl id="report-metadata" class="metadata-grid"></dl>
+        <div class="report-summary">
+          <div id="report-chart" class="pie-chart" role="img" aria-label="Report outcome distribution"></div>
+          <div>
+            <p id="report-summary-text"></p>
+            <ul id="report-legend" class="legend"></ul>
+          </div>
+          <table class="summary-table">
+            <caption>Outcome totals</caption>
+            <tbody id="report-summary-rows"></tbody>
+          </table>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <caption>Item outcomes</caption>
+            <thead><tr><th scope="col">Source ID</th><th scope="col">Seller</th><th scope="col">Name</th><th scope="col">Brand</th><th scope="col">Category</th><th scope="col">Status</th><th scope="col">Action taken</th></tr></thead>
+            <tbody id="report-items"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
