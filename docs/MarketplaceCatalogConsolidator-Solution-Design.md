@@ -205,7 +205,7 @@ For each entry:
 3. Trim fields and collapse internal whitespace.
 4. Normalize case and remove accents for comparison.
 5. Clean category alias `Photo` to `Photography`.
-6. Resolve brand and category against values known in `Product`; an unknown value becomes `NULL`.
+6. Preserve cleaned brand and category values even when they are unfamiliar to `Product`; only missing or empty-after-cleaning values remain `NULL`. An incomplete identity cannot match an existing product.
 7. Strictly match normalized `Brand + Name + Category` only when all three normalized fields are present.
 8. If matching succeeds, add the seller offer for the existing product.
 9. If matching fails, create a new product with the cleaned values and add the seller offer.
@@ -267,7 +267,7 @@ Every upload attempt produces one standalone JSON report outside SQLite, includi
 }
 ```
 
-Each cleaned item names the changed field and shows before/after values. Reports use a stable JSON property order and source-index item order. The report path and SHA-256 are stored in `Upload`; terminal state is not persisted until the report has been atomically published and verified from disk. A `ReportPending` state retains intended status and summary counts across retries.
+Each cleaned item's `actionTaken` names the changed field and its final value, then states whether a product was created or an existing product was linked; it does not repeat quoted before/after text. The original values remain available in the report's raw fields, and final values in its cleaned fields. Reports use a stable JSON property order and source-index item order. The report path and SHA-256 are stored in `Upload`; terminal state is not persisted until the report has been atomically published and verified from disk. A `ReportPending` state retains intended status and summary counts across retries.
 
 ## 8. Security and operations
 
