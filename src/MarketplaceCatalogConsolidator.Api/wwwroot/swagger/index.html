@@ -7,6 +7,17 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css">
 </head>
 <body>
+  <main aria-labelledby="walkthrough-title" style="max-width: 70rem; margin: 1.5rem auto; padding: 0 1rem; font: 1rem/1.5 system-ui, sans-serif; color: #172b4d;">
+    <h1 id="walkthrough-title">Upload-to-catalog walkthrough</h1>
+    <p>Start the local Development API and use <strong>Try it out</strong> in the operations below. Use only the configured API key; never put it in a URL.</p>
+    <ol>
+      <li>Call <code>GET /api/v2/random-uuid</code> for a fresh <code>uuid</code>. In <code>POST /api/v1/uploads</code>, set <code>Idempotency-Key</code> to it, provide <code>X-Api-Key</code>, select the JSON file as the single <code>file</code> part, and copy the <code>uploadId</code> from the <code>202</code> response.</li>
+      <li>Call <code>GET /api/v1/uploads/{uploadId}/status</code> with that ID until <code>upload.status</code> is terminal and <code>upload.reportAvailable</code> is <code>true</code>. Inspect <code>items</code> and <code>actionTaken</code>.</li>
+      <li>Call <code>GET /api/v1/uploads/{uploadId}/report</code> to download the final JSON report. If it returns <code>409</code>, wait and retry the status step. Inspect <code>summary</code> and <code>items</code>.</li>
+      <li>Call <code>GET /api/v1/catalog</code>, optionally filtering by <code>sellerName</code> or <code>name</code>, to see canonical products, seller offers, and <code>totalCount</code>.</li>
+    </ol>
+    <p>The GET operations are public; only upload needs an API key. The sample input is <code>artifacts/ProductEntry.json</code> in the repository.</p>
+  </main>
   <div id="swagger-ui"></div>
   <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
   <script>

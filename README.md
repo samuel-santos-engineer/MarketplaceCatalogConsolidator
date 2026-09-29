@@ -84,6 +84,17 @@ dotnet run --project src/MarketplaceCatalogConsolidator.Api
 
 Swagger UI is public at `/swagger/`; the OpenAPI document is at `/openapi/v1.json`. `POST /api/v1/uploads` accepts exactly one `file` part containing a UTF-8 JSON array, strictly smaller than 500,000 bytes, and requires `Idempotency-Key` (UUID v4) plus `X-Api-Key`. The API key is supplied through `Security__ApiKey` configuration/environment only and is compared in constant time. A newly accepted upload returns `202 Accepted` with upload ID, current status, display filename, SHA-256, and a `Location` header pointing to the live `/api/v1/uploads/{uploadId}/status` endpoint. Missing or invalid credentials return the same `401` response. Invalid multipart/JSON or idempotency headers return `400`, content types other than multipart return `415`, oversized files return `413`, and a reused idempotency key with different bytes returns `409`. Every error has `traceId`, `code`, and `message`. Repeating a key with identical bytes returns the same upload. The background worker handles accepted uploads and writes their immutable report. Do not commit local environment files or secret-bearing settings.
 
+### Swagger happy path: upload to catalog
+
+With the local Development host running as shown above, open [Swagger UI](http://localhost:5254/swagger/). In each operation, select **Try it out**, supply the indicated values, then **Execute**:
+
+1. Open `GET /api/v2/random-uuid`; copy its `uuid` as a fresh upload idempotency key. Open `POST /api/v1/uploads`, set `Idempotency-Key` to that UUID, set `X-Api-Key` to the local Development placeholder (or your configured key), and select `artifacts/ProductEntry.json` for the single multipart `file` field. Execute and copy `uploadId` from the `202` response. Never put the API key in a URL or checked-in file.
+2. Open `GET /api/v1/uploads/{uploadId}/status` and paste the ID. Repeat until `upload.status` is `Completed` or `CompletedWithRejections` and `upload.reportAvailable` is `true`. This public GET needs no key; `items` shows item statuses and `actionTaken` audit text.
+3. Open `GET /api/v1/uploads/{uploadId}/report` with the same ID. Execute to download the immutable JSON report and inspect `summary` and `items`. A `409 report_not_available` means processing/report finalization has not finished; return to step 2.
+4. Open `GET /api/v1/catalog`, optionally set `sellerName` to `MegaStore` or `name` to `Galaxy`, then execute. Inspect `items`, their seller offers, and `totalCount`; public catalog queries also need no key.
+
+The corresponding four-step guide appears above the operations on `/swagger/`. The sample input and starter database are committed under `artifacts/`; run the lab reset only if you intentionally want to discard all working uploads and restore the starter state.
+
 ## Public random UUID (Milestone 9)
 
 `GET /api/v2/random-uuid` returns a fresh RFC 4122 UUID v4 generated server-side by `Guid.NewGuid()` in canonical lowercase D format. It accepts no API-key header, body, or query parameters and accesses no storage/database. It uses the existing public-read rate limit and security/error middleware (`200`, `429`, safe `500`).

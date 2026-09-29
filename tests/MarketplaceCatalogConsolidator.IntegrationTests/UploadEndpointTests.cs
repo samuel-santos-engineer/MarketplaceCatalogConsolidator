@@ -241,6 +241,12 @@ public sealed class UploadEndpointTests
 
         using var swaggerResponse = await fixture.Client.GetAsync("/swagger/");
         Assert.Equal(HttpStatusCode.OK, swaggerResponse.StatusCode);
+        var swaggerPage = await swaggerResponse.Content.ReadAsStringAsync();
+        Assert.Contains("Upload-to-catalog walkthrough", swaggerPage, StringComparison.Ordinal);
+        Assert.Contains("POST /api/v1/uploads", swaggerPage, StringComparison.Ordinal);
+        Assert.Contains("GET /api/v1/uploads/{uploadId}/status", swaggerPage, StringComparison.Ordinal);
+        Assert.Contains("GET /api/v1/uploads/{uploadId}/report", swaggerPage, StringComparison.Ordinal);
+        Assert.Contains("GET /api/v1/catalog", swaggerPage, StringComparison.Ordinal);
     }
 
     private static async Task AssertErrorAsync(HttpResponseMessage response, HttpStatusCode status, string code)
