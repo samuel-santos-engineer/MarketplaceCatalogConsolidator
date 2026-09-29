@@ -69,31 +69,26 @@ public sealed class SourceCatalogItemProcessor(
             return await PersistRejectedAsync(upload.Id, sourceIndex, sourceEntry, suspiciousValue, cancellationToken).ConfigureAwait(false);
         }
 
-        var sellerName = CollapseWhitespace(sourceEntry.SellerName);
+        var sellerName = SourceTextCleaner.Clean(sourceEntry.SellerName);
         if (sellerName is null)
         {
             return await PersistRejectedAsync(upload.Id, sourceIndex, sourceEntry, "SellerName is required.", cancellationToken).ConfigureAwait(false);
         }
 
-        var name = CollapseWhitespace(sourceEntry.Name);
+        var name = SourceTextCleaner.Clean(sourceEntry.Name);
         if (name is null)
         {
             return await PersistRejectedAsync(upload.Id, sourceIndex, sourceEntry, "Name is required.", cancellationToken).ConfigureAwait(false);
         }
 
-        var cleanedSourceId = CollapseWhitespace(sourceEntry.Id);
-        if (!Guid.TryParseExact(cleanedSourceId, "D", out var sourceId))
+        var sourceProductId = SourceTextCleaner.CleanSourceId(sourceEntry.Id);
+        if (sourceProductId is null)
         {
             return await PersistRejectedAsync(upload.Id, sourceIndex, sourceEntry, "Id must be a GUID in D format.", cancellationToken).ConfigureAwait(false);
         }
 
-        var sourceProductId = sourceId.ToString("D");
-        var brand = CollapseWhitespace(sourceEntry.Brand);
-        var category = CollapseWhitespace(sourceEntry.Category);
-        if (category is not null && string.Equals(TextNormalization.NormalizeForComparison(category), "photo", StringComparison.Ordinal))
-        {
-            category = "Photography";
-        }
+        var brand = SourceTextCleaner.Clean(sourceEntry.Brand);
+        var category = SourceTextCleaner.CleanCategory(sourceEntry.Category);
 
         var candidate = new ConsolidationCandidate(
             upload.Id,
@@ -137,15 +132,15 @@ public sealed class SourceCatalogItemProcessor(
         var result = new UploadItemProcessingResult(
             UploadItemStatus.Rejected,
             reason,
-            SourceProductId: CanonicalGuid(source?.Id),
+            SourceProductId: SourceTextCleaner.CleanSourceId(source?.Id),
             RawSellerName: source?.SellerName,
             RawName: source?.Name,
             RawBrand: source?.Brand,
             RawCategory: source?.Category,
-            CleanedSellerName: CollapseWhitespace(source?.SellerName),
-            CleanedName: CollapseWhitespace(source?.Name),
-            CleanedBrand: CollapseWhitespace(source?.Brand),
-            CleanedCategory: CleanCategory(source?.Category));
+            CleanedSellerName: SourceTextCleaner.Clean(source?.SellerName),
+            CleanedName: SourceTextCleaner.Clean(source?.Name),
+            CleanedBrand: SourceTextCleaner.Clean(source?.Brand),
+            CleanedCategory: SourceTextCleaner.CleanCategory(source?.Category));
 
         await SaveOutcomeAsync(uploadId, sourceIndex, result, cancellationToken).ConfigureAwait(false);
         return result with { OutcomePersisted = true };
@@ -177,28 +172,6 @@ public sealed class SourceCatalogItemProcessor(
             ?? SqlControlSequencePolicy.GetRejectionReason("Name", source.Name)
             ?? SqlControlSequencePolicy.GetRejectionReason("Brand", source.Brand)
             ?? SqlControlSequencePolicy.GetRejectionReason("Category", source.Category);
-    }
-
-    private static string? CleanCategory(string? value)
-    {
-        var cleaned = CollapseWhitespace(value);
-        return cleaned is not null && string.Equals(TextNormalization.NormalizeForComparison(cleaned), "photo", StringComparison.Ordinal)
-            ? "Photography"
-            : cleaned;
-    }
-
-    private static string? CanonicalGuid(string? value) =>
-        Guid.TryParseExact(CollapseWhitespace(value), "D", out var guid) ? guid.ToString("D") : null;
-
-    private static string? CollapseWhitespace(string? value)
-    {
-        if (value is null)
-        {
-            return null;
-        }
-
-        var segments = value.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        return segments.Length == 0 ? null : string.Join(' ', segments);
     }
 
     private static string CreateFingerprint(SourceProductEntry source)

@@ -171,10 +171,10 @@ For each entry:
 
 1. Validate required fields and a GUID-shaped source `Id`.
 2. Apply the agreed suspicious-SQL-input business rule; every SQL operation remains parameterized regardless.
-3. Trim fields and collapse internal whitespace.
+3. Use `SourceTextCleaner` to preserve Unicode letters/digits and visible ASCII, remove other characters, trim fields, and collapse internal whitespace. ASCII quotes and apostrophes remain valid.
 4. Normalize case and remove accents for comparison.
 5. Clean category alias `Photo` to `Photography`.
-6. Resolve brand and category against values known in `Product`; an unknown value becomes `NULL`.
+6. Preserve valid cleaned seller, brand, and category values, including values not yet present in `Product`. Only empty optional brand/category values become `NULL`.
 7. Strictly match normalized `Brand + Name + Category` only when all three normalized fields are present.
 8. If matching succeeds, add the seller offer for the existing product.
 9. If matching fails, create a new product with the cleaned values and add the seller offer.
@@ -230,7 +230,7 @@ Every upload attempt produces one standalone JSON report outside SQLite, includi
 }
 ```
 
-Each cleaned item names the changed field and shows before/after values. The report path and SHA-256 are stored in `Upload`; the report body remains a file artifact.
+Each cleaned item names the changed field and shows its final value, for example `Name: Smartphone Galaxy S23 Linked seller FitnessCenter to existing product 2.` Accepted items with unchanged values are `Approved`; any changed reported value produces `Cleaned`. Raw fields preserve the original input. The report path and SHA-256 are stored in `Upload`; the report body remains a file artifact.
 
 ## 8. Security and operations
 

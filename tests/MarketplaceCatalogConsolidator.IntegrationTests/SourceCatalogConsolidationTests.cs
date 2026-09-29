@@ -11,6 +11,36 @@ namespace MarketplaceCatalogConsolidator.IntegrationTests;
 
 public sealed class SourceCatalogConsolidationTests
 {
+    [Theory]
+    [InlineData("Smartphone  Galaxy S23")]
+    [InlineData("Smartphone \u00a0Galaxy S23")]
+    public async Task FinalReportUsesCleanedNameInConciseAction(string rawName)
+    {
+        using var fixture = new ConsolidationFixture();
+        var canonicalId = await fixture.EnsureProductAsync("Smartphone Galaxy S23", "Samsung", "Electronics");
+        var upload = await fixture.CreateQueuedUploadAsync(JsonSerializer.Serialize(new[]
+        {
+            Source("FitnessCenter", rawName, "Samsung", "Electronics")
+        }));
+        var reportStore = new FileSystemReportFileStore(fixture.Paths);
+        var workflow = new ConsolidationWorkflow(fixture.UploadStore, fixture.ItemStore, fixture.Processor,
+            new FileSystemWorkflowLock(fixture.Paths),
+            new UploadReportFinalizationService(fixture.UploadStore, fixture.ItemStore, reportStore));
+
+        Assert.True(await workflow.ProcessNextAsync());
+
+        await using var stream = await reportStore.OpenReadAsync(upload.Id);
+        using var report = await JsonDocument.ParseAsync(stream);
+        var item = report.RootElement.GetProperty("items")[0];
+        Assert.Equal($"Name: Smartphone Galaxy S23 Linked seller FitnessCenter to existing product {canonicalId}.",
+            item.GetProperty("actionTaken").GetString());
+        Assert.DoesNotContain("\\u0022", item.GetProperty("actionTaken").GetRawText(), StringComparison.Ordinal);
+        Assert.DoesNotContain("\\u003E", item.GetProperty("actionTaken").GetRawText(), StringComparison.Ordinal);
+        Assert.Equal("Cleaned", item.GetProperty("status").GetString());
+        Assert.Equal(rawName, item.GetProperty("name").GetString());
+        Assert.Equal("Smartphone Galaxy S23", item.GetProperty("cleanedName").GetString());
+    }
+
     [Fact]
     public async Task WhitespaceCleanupLinksExistingProductAndPersistsHumanReadableOutcome()
     {
@@ -20,7 +50,7 @@ public sealed class SourceCatalogConsolidationTests
 
         Assert.Equal(UploadItemStatus.Cleaned, result.Status);
         Assert.Equal(canonicalId, result.MatchedProductId);
-        Assert.Contains("Name: \"Smartphone  Galaxy S23\" -> \"Smartphone Galaxy S23\"", result.ActionTaken, StringComparison.Ordinal);
+        Assert.Equal($"Name: Smartphone Galaxy S23 Linked seller MegaStore to existing product {canonicalId}.", result.ActionTaken);
         Assert.Contains($"existing product {canonicalId}", result.ActionTaken, StringComparison.Ordinal);
         Assert.True(result.OutcomePersisted);
         Assert.Equal(1, await fixture.CountAsync("SELECT COUNT(*) FROM Product WHERE NormalizedName = $name;", ("$name", "smartphone galaxy s23")));
@@ -29,6 +59,95 @@ public sealed class SourceCatalogConsolidationTests
         Assert.Equal("Smartphone  Galaxy S23", saved.RawName);
         Assert.Equal("Smartphone Galaxy S23", saved.CleanedName);
         Assert.Equal(canonicalId, saved.MatchedProductId);
+    }
+
+    [Theory]
+    [InlineData("Headphones Sony WH-1000XM5", "Sony", "Electronics")]
+    [InlineData("Monitor LG UltraWide 34\"", "LG", "Monitors")]
+    [InlineData("Tablet iPad Pro 12.9\"", "Apple", "Electronics")]
+    public async Task RequestedUnchangedProductNamesAreApproved(string name, string brand, string category)
+    {
+        using var fixture = new ConsolidationFixture();
+        var canonicalId = await fixture.EnsureProductAsync(name, brand, category);
+
+        var result = await fixture.ProcessAsync(Source("TestShop", name, brand, category));
+
+        Assert.Equal(UploadItemStatus.Approved, result.Status);
+        Assert.Equal(name, result.CleanedName);
+        Assert.Equal(canonicalId, result.MatchedProductId);
+        var saved = Assert.Single(await fixture.ItemStore.GetByUploadIdAsync(fixture.LastUploadId));
+        Assert.Equal(UploadItemStatus.Approved, saved.Status);
+        Assert.Equal(name, saved.RawName);
+        Assert.Equal(name, saved.CleanedName);
+    }
+
+    [Fact]
+    public async Task RemovesEmbeddedNonPrintingCharactersFromCleanedFields()
+    {
+        using var fixture = new ConsolidationFixture();
+
+        var result = await fixture.ProcessAsync(Source("Seller\u200bName", "Monitor LG\u000034 UltraWide", "L\u200bG", "Electronics"));
+
+        Assert.Equal(UploadItemStatus.Cleaned, result.Status);
+        Assert.Equal("SellerName", result.CleanedSellerName);
+        Assert.Equal("Monitor LG34 UltraWide", result.CleanedName);
+        Assert.Equal("LG", result.CleanedBrand);
+    }
+
+    [Theory]
+    [InlineData("Id")]
+    [InlineData("SellerName")]
+    [InlineData("Name")]
+    [InlineData("Brand")]
+    [InlineData("Category")]
+    public async Task ChangingAnyOriginalFieldPersistsCleanedStatus(string field)
+    {
+        using var fixture = new ConsolidationFixture();
+        var source = new Dictionary<string, string>
+        {
+            ["Id"] = Guid.NewGuid().ToString("D"),
+            ["SellerName"] = "HomeGoods",
+            ["Name"] = "Monitor LG UltraWide 34",
+            ["Brand"] = "LG",
+            ["Category"] = "Monitors"
+        };
+        source[field] += "\u200b";
+
+        var result = await fixture.ProcessAsync(source);
+
+        Assert.Equal(UploadItemStatus.Cleaned, result.Status);
+        Assert.Contains($"{field}:", result.ActionTaken, StringComparison.Ordinal);
+        var saved = Assert.Single(await fixture.ItemStore.GetByUploadIdAsync(fixture.LastUploadId));
+        Assert.Equal(UploadItemStatus.Cleaned, saved.Status);
+    }
+
+    [Fact]
+    public async Task MonitorNonAsciiQuoteCleanupAppearsInFinalReportAndSummary()
+    {
+        using var fixture = new ConsolidationFixture();
+        const string sourceId = "a7b8c9d0-e1f2-4a5b-4c5d-6e7f8a9b0c1d";
+        var upload = await fixture.CreateQueuedUploadAsync(JsonSerializer.Serialize(new[]
+        {
+            Source("HomeGoods", "Monitor LG UltraWide 34\u201d", "LG", "Monitors", sourceId)
+        }));
+        var reportStore = new FileSystemReportFileStore(fixture.Paths);
+        var workflow = new ConsolidationWorkflow(fixture.UploadStore, fixture.ItemStore, fixture.Processor,
+            new FileSystemWorkflowLock(fixture.Paths),
+            new UploadReportFinalizationService(fixture.UploadStore, fixture.ItemStore, reportStore));
+
+        Assert.True(await workflow.ProcessNextAsync());
+
+        var completed = await fixture.UploadStore.FindByIdAsync(upload.Id);
+        Assert.NotNull(completed);
+        Assert.Equal(1, completed.CleanedCount);
+        Assert.Equal(0, completed.ApprovedCount);
+        await using var stream = await reportStore.OpenReadAsync(upload.Id);
+        using var report = await JsonDocument.ParseAsync(stream);
+        var item = report.RootElement.GetProperty("items")[0];
+        Assert.Equal(sourceId, item.GetProperty("id").GetString());
+        Assert.Equal("Cleaned", item.GetProperty("status").GetString());
+        Assert.Equal("Monitor LG UltraWide 34", item.GetProperty("cleanedName").GetString());
+        Assert.Equal("Monitor LG UltraWide 34\u201d", item.GetProperty("name").GetString());
     }
 
     [Fact]
@@ -42,7 +161,7 @@ public sealed class SourceCatalogConsolidationTests
 
         Assert.Equal(UploadItemStatus.Cleaned, result.Status);
         Assert.Equal(canonicalId, result.MatchedProductId);
-        Assert.Contains("Name: \"Câmera Canon EOS R6\" -> \"Camera Canon EOS R6\"", result.ActionTaken, StringComparison.Ordinal);
+        Assert.Contains("Name: Camera Canon EOS R6", result.ActionTaken, StringComparison.Ordinal);
         Assert.Equal(initialCount, await fixture.CountAsync("SELECT COUNT(*) FROM Product;"));
     }
 
@@ -57,7 +176,7 @@ public sealed class SourceCatalogConsolidationTests
         Assert.Equal(UploadItemStatus.Cleaned, result.Status);
         Assert.Equal(canonicalId, result.MatchedProductId);
         Assert.Equal("Photography", result.CleanedCategory);
-        Assert.Contains("Category: \"Photo\" -> \"Photography\"", result.ActionTaken, StringComparison.Ordinal);
+        Assert.Contains("Category: Photography", result.ActionTaken, StringComparison.Ordinal);
         Assert.Equal(1, await fixture.CountAsync("SELECT COUNT(*) FROM Product WHERE NormalizedName = $name;", ("$name", "eos r6 camera kit")));
     }
 
@@ -93,20 +212,32 @@ public sealed class SourceCatalogConsolidationTests
         Assert.Equal(name, await fixture.ReadProductNameAsync(result.MatchedProductId.Value));
     }
 
-    [Fact]
-    public async Task UnknownBrandAndCategoryBecomeNullAndDoNotMatchIncompleteIdentity()
+    [Theory]
+    [InlineData("SportsHub", "Belt Leather Reversible", "Levi's", "Accessories")]
+    [InlineData("NewSeller", "New Catalog Item", "Unknown Brand", "Unknown Category")]
+    [InlineData("O'Brian's Shop", "New Camera Item", "canon", "photography")]
+    public async Task ValidSellerBrandAndCategoryRemainUnchangedAndApproved(string seller, string name, string brand, string category)
     {
         using var fixture = new ConsolidationFixture();
-        var name = $"Incomplete Identity Item {Guid.NewGuid():N}";
-        var result = await fixture.ProcessAsync(Source("UnknownSeller", name, "Unknown Brand", "Unknown Category"));
+        var result = await fixture.ProcessAsync(Source(seller, name, brand, category));
 
-        Assert.Equal(UploadItemStatus.Cleaned, result.Status);
-        Assert.Contains("Brand: \"Unknown Brand\" -> NULL", result.ActionTaken, StringComparison.Ordinal);
-        Assert.Contains("Category: \"Unknown Category\" -> NULL", result.ActionTaken, StringComparison.Ordinal);
-        Assert.Null(result.CleanedBrand);
-        Assert.Null(result.CleanedCategory);
-        Assert.Equal(1, await fixture.CountAsync("SELECT COUNT(*) FROM Product WHERE Name = $name AND Brand IS NULL AND Category IS NULL;", ("$name", name)));
-        Assert.Null(await fixture.FindByIdentityAsync("unknown brand", "unknown category", name));
+        Assert.Equal(UploadItemStatus.Approved, result.Status);
+        Assert.Equal(seller, result.CleanedSellerName);
+        Assert.Equal(name, result.CleanedName);
+        Assert.Equal(brand, result.CleanedBrand);
+        Assert.Equal(category, result.CleanedCategory);
+        Assert.Equal($"Created Product {result.MatchedProductId} and linked seller {seller}.", result.ActionTaken);
+        Assert.Equal(1, await fixture.CountAsync("SELECT COUNT(*) FROM Product WHERE Name = $name AND Brand = $brand AND Category = $category;",
+            ("$name", name), ("$brand", brand), ("$category", category)));
+        var product = await fixture.FindByIdentityAsync(TextNormalization.NormalizeForComparison(brand),
+            TextNormalization.NormalizeForComparison(category), TextNormalization.NormalizeForComparison(name));
+        Assert.NotNull(product);
+        Assert.Equal(result.MatchedProductId, product.Id);
+        var saved = Assert.Single(await fixture.ItemStore.GetByUploadIdAsync(fixture.LastUploadId));
+        Assert.Equal(UploadItemStatus.Approved, saved.Status);
+        Assert.Equal(seller, saved.CleanedSellerName);
+        Assert.Equal(brand, saved.CleanedBrand);
+        Assert.Equal(category, saved.CleanedCategory);
     }
 
     [Fact]
