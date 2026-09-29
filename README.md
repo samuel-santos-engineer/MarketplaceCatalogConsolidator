@@ -157,6 +157,24 @@ Configuration keys:
 
 Infrastructure consumers can use `FileSystemStoragePaths`, `SqliteWorkingDatabaseBootstrapper`, and `SqliteDatabaseMigrator` to initialize storage. At startup, `Processing` uploads return to `Queued` while their committed item outcomes remain persisted; the worker skips those indexes when resuming. Each valid item's product change, seller link, and `UploadItem` result share one transaction. When processing finishes, durable counts and intended outcome are stored as `ReportPending`; the report is atomically published, read back, and hashed before the upload receives its terminal state. Report failures remain retryable. For local upload testing, set `Security__ApiKey` in the shell environment. The deployed app must be HTTPS-only at its ingress.
 
+## Database design and growth
+
+### Transaction policy
+
+Each accepted item's product lookup/create, `SellerProduct` association, and persisted `UploadItem` outcome commit together in one SQLite transaction. A storage failure rolls back that item's writes, so it cannot leave a partial product or seller link. Independent per-item transactions intentionally retain earlier committed progress: a rejected item does not undo valid items, and recovery skips source indexes whose outcomes are already durable. For this bounded lab upload, restart recovery and useful partial results outweigh rolling back the entire file. Summary counts and immutable report finalization occur after item processing and remain retryable independently.
+
+One all-or-nothing file transaction is an alternative business policy, not an omitted safeguard. It would require explicit batch acceptance/rollback semantics and a revised recovery/report design, while holding the write transaction across the whole import. The current policy permits partial success; it does not promise whole-file atomicity.
+
+### Indexed lookup and growth path
+
+Consolidation uses stored comparison keys and parameterized equality on `(NormalizedBrand, NormalizedName, NormalizedCategory)`, supported by `IX_Product_NormalizedIdentity`; matching does not normalize and scan every catalog row for each source item. Lookup selects the lowest product ID if existing rows share an identity. The index is non-unique: this is not a database-wide guarantee that historical duplicates are absent. Maintaining comparison columns and the index adds storage and write/migration work, but avoids repeated normalization of the catalog during strict matching. The starter has 975 products and the supplied input has 269 entries; no production-scale throughput claim is made.
+
+Public catalog search is a different query path: it currently applies `public_normalize` to display fields, uses a literal substring predicate for names, and returns offset-based pages. The identity index does not make those expressions or arbitrary substring searches efficiently indexed. This simple approach is suitable for the current bounded dataset; larger workloads require measured query plans, latency, and pagination costs before changing the design. Possible improvements include separately indexed normalized search fields, seller-filter indexes, and keyset pagination. Search normalization must remain separate from product-identity rules such as the optional inch marker.
+
+SQLite fits the current local/lab deployment: one working database, a serialized worker/maintenance gate, and short item transactions. A future move to PostgreSQL would keep the Application ports and strict matching contract while replacing the storage adapters and migrations. That migration must explicitly preserve normalization, foreign keys, seller/source-ID uniqueness, request idempotency, and item/outcome atomicity. Multiple workers would also require database-coordinated claims and locking plus a revised shared-artifact/report design; changing the database alone is not scale-out. Validate legacy duplicate and incomplete identities before adding any stronger product-identity uniqueness constraint.
+
+As catalog-search needs grow, evaluate relational indexes first, then PostgreSQL full-text or trigram search, or a dedicated search index with an explicit synchronization strategy. These are future discovery/review options, not implemented dependencies or automatic merge rules. Vector search is not required for the current deterministic product-matching contract; neither fuzzy nor semantic search should override strict identity automatically.
+
 ## Verification
 
 All changes follow **feature branch -> pull request -> user review -> user merge to main**. Do not push project code directly to `main`, merge on the user's behalf, or enable auto-merge. See [CONTRIBUTING.md](docs/CONTRIBUTING.md) and [SECURITY.md](docs/SECURITY.md). Repository guidance and the manual PR template are in [AGENTS.md](docs/AGENTS.md) and [pull_request_template.md](docs/pull_request_template.md).
