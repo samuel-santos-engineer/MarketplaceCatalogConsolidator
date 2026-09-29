@@ -3,7 +3,7 @@
 # Marketplace Catalog Consolidator
 
 [![Milestone](https://img.shields.io/badge/milestone-9-blue)](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/milestones)
-[![Tests](https://img.shields.io/badge/tests-172%20passing-brightgreen)](tests)
+[![Tests](https://img.shields.io/badge/tests-173%20passing-brightgreen)](tests)
 [![CI](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/actions/workflows/ci.yml)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![Docker](https://img.shields.io/badge/Docker-containerized-2496ED?logo=docker)](Dockerfile)
