@@ -2,14 +2,16 @@
 
 # Marketplace Catalog Consolidator
 
-[![Milestone](https://img.shields.io/badge/milestone-9-blue)](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/milestones)
+[![Milestone](https://img.shields.io/badge/milestone-12-blue)](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/milestones)
 [![Tests](https://img.shields.io/badge/tests-173%20passing-brightgreen)](tests)
 [![CI](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/actions/workflows/ci.yml)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![Docker](https://img.shields.io/badge/Docker-containerized-2496ED?logo=docker)](Dockerfile)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-Marketplace Catalog Consolidator is a .NET 10 API for consolidating seller product catalogs into a canonical SQLite catalog. The project is being delivered incrementally against [the solution design](docs/MarketplaceCatalogConsolidator-Solution-Design.md). Milestone 9 adds a public UUID v4 generator to the existing upload, lab reset, public read, Swagger, and operational features. Docker/Azure work is reserved for the final deployment milestone.
+Marketplace Catalog Consolidator is a high-performance .NET 10 API that cleans, matches, and unifies seller product feeds into a single canonical catalog with atomic transaction safety, using SQLite database.
+
+👉 **Live Demo Available** [https://marketplace-catalog-consolidator-ss-wcus.azurewebsites.net/](https://marketplace-catalog-consolidator-ss-wcus.azurewebsites.net/)
 
 ## Final sign-off
 
@@ -26,7 +28,9 @@ IntegrationTests -> Infrastructure
 
 The API project is the composition root and may reference Infrastructure for dependency registration. Application contains use cases and provider-neutral ports, Domain contains business rules and entities, and Infrastructure owns SQLite and file-system adapters. Unit and integration tests are kept in separate projects. The intended runtime uses one API instance and one serialized consolidation worker, with the working database, upload staging, and immutable reports persisted under `/home/data`.
 
-## Current status
+## Completed Milestones & Features
+
+The project is being delivered incrementally against [the solution design](docs/MarketplaceCatalogConsolidator-Solution-Design.md). Milestone 9 adds a public UUID v4 generator to the existing upload, lab reset, public read, Swagger, and operational features. Docker/Azure work is reserved for the final deployment milestone.
 
 The solution targets `net10.0` and includes API, Application, Domain, Infrastructure, UnitTests, and IntegrationTests projects. The API exposes nine versioned routes documented below. Startup initializes storage under the shared workflow gate, completes any interrupted lab reset, applies migrations, recovers interrupted uploads, and resumes pending report finalizations before running the host. One hosted consolidation worker polls at a bounded interval and uses the data-root gate plus an atomic SQLite claim to serialize work across service instances sharing that root. The production item processor validates and cleans source entries, preserves valid brand/category values, strictly matches products, writes seller offers, and commits each item outcome atomically with its catalog changes. Terminal outcomes are persisted only after an immutable report is published and verified.
 
@@ -90,7 +94,7 @@ Swagger UI is public at `/swagger/`; the OpenAPI document is at `/openapi/v1.jso
 
 ### Swagger happy path: upload to catalog
 
-With the local Development host running as shown above, open [Swagger UI](http://localhost:5254/swagger/). In each operation, select **Try it out**, supply the indicated values, then **Execute**:
+With the local Development host running as shown above, open [Swagger UI](https://marketplace-catalog-consolidator-ss-wcus.azurewebsites.net/swagger/). In each operation, select **Try it out**, supply the indicated values, then **Execute**:
 
 1. Open `GET /api/v2/random-uuid`; copy its `uuid` as a fresh upload idempotency key. Open `POST /api/v1/uploads`, set `Idempotency-Key` to that UUID, set `X-Api-Key` to the local Development placeholder (or your configured key), and select `artifacts/ProductEntry.json` for the single multipart `file` field. Execute and copy `uploadId` from the `202` response. Never put the API key in a URL or checked-in file.
 2. Open `GET /api/v1/uploads/{uploadId}/status` and paste the ID. Repeat until `upload.status` is `Completed` or `CompletedWithRejections` and `upload.reportAvailable` is `true`. This public GET needs no key; `items` shows item statuses and `actionTaken` audit text.
@@ -104,7 +108,7 @@ The corresponding four-step guide appears above the operations on `/swagger/`. T
 `GET /api/v2/random-uuid` returns a fresh RFC 4122 UUID v4 generated server-side by `Guid.NewGuid()` in canonical lowercase D format. It accepts no API-key header, body, or query parameters and accesses no storage/database. It uses the existing public-read rate limit and security/error middleware (`200`, `429`, safe `500`).
 
 ```powershell
-Invoke-RestMethod -Uri 'http://localhost:5254/api/v2/random-uuid'
+Invoke-RestMethod -Uri 'https://marketplace-catalog-consolidator-ss-wcus.azurewebsites.net/api/v2/random-uuid'
 ```
 
 Example response: `{ "uuid": "9d0df985-610c-4e54-8d50-519e972a42a6" }`. Each request generates a new value; you can use it as the UUID v4 upload `Idempotency-Key`.
@@ -133,14 +137,14 @@ Use this endpoint instead of deleting a running service's storage folder: it pre
 All GET routes below are public and require no API-key header. In Swagger, expand a GET operation and select **Try it out**; both upload and lab-reset POST operations need credentials.
 
 
-| Route | Queries and response |
-| --- | --- |
-| `GET /api/v1/uploads` | Optional `status`, `page=1`, `pageSize=25`. Returns upload attempts ordered by start time descending, then ID descending. |
-| `GET /api/v1/uploads/{uploadId}/status` | `page=1`, `pageSize=50`. Returns upload metadata, trace ID, safe failure details, and items ordered by source index. |
-| `GET /api/v1/uploads/{uploadId}/report` | Downloads the immutable final report as `application/json`. |
-| `GET /api/v1/catalog` | Optional category, brand, name, and seller filters; page defaults to 1 and page size to 25. |
-| `GET /api/v1/health` | Returns `200` without database or filesystem checks. |
-| `GET /api/v1/ready` | Returns `200` when SQLite and storage are available; otherwise `503`. |
+| Route                                   | Queries and response                                                                                                     |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/uploads`                   | Optional`status`, `page=1`, `pageSize=25`. Returns upload attempts ordered by start time descending, then ID descending. |
+| `GET /api/v1/uploads/{uploadId}/status` | `page=1`, `pageSize=50`. Returns upload metadata, trace ID, safe failure details, and items ordered by source index.     |
+| `GET /api/v1/uploads/{uploadId}/report` | Downloads the immutable final report as`application/json`.                                                               |
+| `GET /api/v1/catalog`                   | Optional category, brand, name, and seller filters; page defaults to 1 and page size to 25.                              |
+| `GET /api/v1/health`                    | Returns`200` without database or filesystem checks.                                                                      |
+| `GET /api/v1/ready`                     | Returns`200` when SQLite and storage are available; otherwise `503`.                                                     |
 
 Pagination responses contain `items`, `pageNumber`, `pageSize`, and `totalCount`. Pages must be positive integers; page size is 1–100 on all paginated routes. Invalid values return `400 invalid_pagination`; an unsupported upload-state filter returns `400 invalid_status`. Pages beyond the result set return an empty `items` array. Offset pagination is stable for unchanged data; new uploads or catalog changes can move subsequent pages.
 
@@ -162,13 +166,13 @@ GET /api/v1/ready
 Configuration keys:
 
 
-| Environment variable | Purpose |
-| --- | --- |
-| `Security__ApiKey` | Required upload credential; never place in source control, logs, reports, query strings, or OpenAPI examples. |
-| `Development__UsePlaceholderApiKey` | Explicit opt-in to the public local placeholder, accepted only in Development. |
-| `Catalog__StorageRoot` | Persistent data root for the working catalog, staged uploads, and reports. |
-| `Catalog__StarterDatabasePath` | Optional path to the immutable starter database. |
-| `ASPNETCORE_HTTP_PORTS` | HTTP listener port; the container baseline uses `8080`. |
+| Environment variable                | Purpose                                                                                                       |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `Security__ApiKey`                  | Required upload credential; never place in source control, logs, reports, query strings, or OpenAPI examples. |
+| `Development__UsePlaceholderApiKey` | Explicit opt-in to the public local placeholder, accepted only in Development.                                |
+| `Catalog__StorageRoot`              | Persistent data root for the working catalog, staged uploads, and reports.                                    |
+| `Catalog__StarterDatabasePath`      | Optional path to the immutable starter database.                                                              |
+| `ASPNETCORE_HTTP_PORTS`             | HTTP listener port; the container baseline uses`8080`.                                                        |
 
 Infrastructure consumers can use `FileSystemStoragePaths`, `SqliteWorkingDatabaseBootstrapper`, and `SqliteDatabaseMigrator` to initialize storage. At startup, `Processing` uploads return to `Queued` while their committed item outcomes remain persisted; the worker skips those indexes when resuming. Each valid item's product change, seller link, and `UploadItem` result share one transaction. When processing finishes, durable counts and intended outcome are stored as `ReportPending`; the report is atomically published, read back, and hashed before the upload receives its terminal state. Report failures remain retryable. For local upload testing, set `Security__ApiKey` in the shell environment. The deployed app must be HTTPS-only at its ingress.
 
@@ -235,7 +239,12 @@ The runtime image baseline uses the .NET 10 ASP.NET base image, listens on port 
 
 ## Azure deployment
 
-The target is Azure App Service Linux F1 in West Central US, running the published Docker image. Configure persistent storage for `/home/data`, set `Security__ApiKey` through App Service application settings, and require HTTPS at the App Service ingress. Keep the starter database immutable and ensure its working copy and all upload/report data remain on persistent storage. No cloud resources or deployments are created by this repository setup milestone.
+The public application is deployed into Azure App Service within the constraints of the Azure F1 free tier.
+
+- **Live URL:** [https://marketplace-catalog-consolidator-ss-wcus.azurewebsites.net/](https://marketplace-catalog-consolidator-ss-wcus.azurewebsites.net/)
+- **Swagger UI:** [https://marketplace-catalog-consolidator-ss-wcus.azurewebsites.net/swagger/](https://marketplace-catalog-consolidator-ss-wcus.azurewebsites.net/swagger/)
+
+The target is Azure App Service Linux F1 in West Central US, running the published Docker image. Persistent storage is configured for `/home/data`, `Security__ApiKey` is set via App Service application settings, and HTTPS is enforced at the App Service ingress. The starter database remains immutable, and its working copy, upload staging, and generated reports reside on persistent storage.
 
 ## Known limitations
 
