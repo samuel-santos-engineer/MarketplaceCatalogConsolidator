@@ -9,7 +9,11 @@ using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.AddApiHardening();
-builder.Services.AddOpenApi(options => options.AddOperationTransformer(UploadEndpoints.TransformOpenApiAsync));
+builder.Services.AddOpenApi(options =>
+{
+    options.AddOperationTransformer(UploadEndpoints.TransformOpenApiAsync);
+    options.AddOperationTransformer(LabResetEndpoints.TransformOpenApiAsync);
+});
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddSingleton<IStoragePaths>(_ => new FileSystemStoragePaths(new CatalogStorageOptions(
@@ -20,6 +24,8 @@ builder.Services.AddSingleton<SqliteConnectionFactory>(services =>
 builder.Services.AddSingleton<IWorkingDatabaseBootstrapper, SqliteWorkingDatabaseBootstrapper>();
 builder.Services.AddSingleton<IDatabaseMigrator, SqliteDatabaseMigrator>();
 builder.Services.AddSingleton<IWorkflowLock, FileSystemWorkflowLock>();
+builder.Services.AddSingleton<ILabDatabaseResetStorage, SqliteLabDatabaseResetStorage>();
+builder.Services.AddSingleton<ILabDatabaseResetService, LabDatabaseResetService>();
 builder.Services.AddSingleton<IUploadStore, SqliteUploadStore>();
 builder.Services.AddSingleton<IPublicReadStore, SqlitePublicReadStore>();
 builder.Services.AddSingleton<IReadinessCheck, StorageReadinessCheck>();
@@ -48,11 +54,28 @@ app.UseStaticFiles();
 app.MapOpenApi("/openapi/v1.json").RequireRateLimiting(ApiHardening.ReadPolicy);
 app.MapUploadEndpoints();
 app.MapPublicReadEndpoints();
+app.MapLabResetEndpoints();
 
 var paths = app.Services.GetRequiredService<IStoragePaths>();
 ApiHardening.ValidateRuntimeConfiguration(builder.Configuration, app.Environment, paths);
-await app.Services.GetRequiredService<IWorkingDatabaseBootstrapper>().EnsureWorkingDatabaseAsync(app.Lifetime.ApplicationStopping);
-await app.Services.GetRequiredService<IDatabaseMigrator>().MigrateAsync(paths.WorkingDatabasePath, app.Lifetime.ApplicationStopping);
+await using (var initializationLease = await app.Services.GetRequiredService<IWorkflowLock>().AcquireMaintenanceAsync(app.Lifetime.ApplicationStopping))
+{
+    var resetStorage = app.Services.GetRequiredService<ILabDatabaseResetStorage>();
+    if (resetStorage.HasPendingReset)
+    {
+        try { await resetStorage.ResetAsync(app.Lifetime.ApplicationStopping); }
+        catch (Exception)
+        {
+            app.Logger.LogError("Interrupted lab reset recovery failed; startup cannot continue");
+            throw new LabDatabaseResetException();
+        }
+    }
+    else
+    {
+        await app.Services.GetRequiredService<IWorkingDatabaseBootstrapper>().EnsureWorkingDatabaseAsync(app.Lifetime.ApplicationStopping);
+        await app.Services.GetRequiredService<IDatabaseMigrator>().MigrateAsync(paths.WorkingDatabasePath, app.Lifetime.ApplicationStopping);
+    }
+}
 await app.Services.GetRequiredService<StartupRecoveryService>().RecoverAsync(app.Lifetime.ApplicationStopping);
 
 await app.RunAsync();

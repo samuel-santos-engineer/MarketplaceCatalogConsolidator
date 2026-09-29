@@ -1,3 +1,5 @@
+using MarketplaceCatalogConsolidator.Application.Ports;
+
 namespace MarketplaceCatalogConsolidator.Application.Workflow;
 
 public sealed class ConsolidationPollingWorker(ConsolidationWorkflow workflow, TimeSpan idleInterval)
@@ -13,7 +15,16 @@ public sealed class ConsolidationPollingWorker(ConsolidationWorkflow workflow, T
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var processed = await _workflow.ProcessNextAsync(cancellationToken).ConfigureAwait(false);
+            bool processed;
+            try
+            {
+                processed = await _workflow.ProcessNextAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (MaintenanceUnavailableException)
+            {
+                // A failed/interrupted reset fences storage, but must not stop the host.
+                processed = false;
+            }
             if (!processed)
             {
                 await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false);

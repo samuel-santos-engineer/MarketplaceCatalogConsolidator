@@ -145,7 +145,7 @@ public sealed class ConsolidationWorkflow(
     {
         try
         {
-            return await _reportFinalizationService.FinalizeAsync(uploadId, cancellationToken).ConfigureAwait(false);
+            return await _reportFinalizationService.FinalizeUnderGateAsync(uploadId, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

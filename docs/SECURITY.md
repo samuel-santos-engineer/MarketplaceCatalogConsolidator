@@ -10,6 +10,8 @@ Include affected versions, a minimal reproduction with synthetic data, expected 
 
 ## Secrets and operation
 
+The lab-only `POST /api/v2/reset-database` is destructive and requires the same constant-time API-key verification as uploads plus exact `X-Reset-Confirmation: RESET_DATABASE` and no body. It shares the strict upload mutation rate limit. Production must disable/remove this route or require a separate intentional production decision; the public Development placeholder is never a production credential. Reset discards prior demo uploads and reports, so use only synthetic data. The existing workflow gate protects all storage operations; a durable pending-reset marker fences readiness and uploads after failure until retry/startup restores the migrated baseline. Logs and errors expose only safe diagnostics, never keys, paths, or exception messages.
+
 Supply the upload API key through `Security__ApiKey` runtime environment/App Service configuration. Use a unique high-entropy production value (at least 32 random bytes); never commit it or include it in reports, logs, Swagger examples, or query strings. The development placeholder is public and explicitly restricted to local Development. Test markers are synthetic and must never be accepted as deployment credentials.
 
 If a credential is exposed, revoke/rotate it first and privately coordinate removal from history. Passing secret scanning is useful evidence, not a guarantee that all secret types have been detected.

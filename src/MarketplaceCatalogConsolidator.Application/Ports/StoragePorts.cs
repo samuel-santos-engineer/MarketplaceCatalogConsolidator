@@ -39,4 +39,7 @@ public interface IReportFileStore
 public interface IWorkflowLock
 {
     Task<IAsyncDisposable> AcquireAsync(CancellationToken cancellationToken = default);
+    Task<IAsyncDisposable> AcquireMaintenanceAsync(CancellationToken cancellationToken = default) => AcquireAsync(cancellationToken);
 }
+
+public sealed class MaintenanceUnavailableException() : Exception("Storage maintenance has not completed.");
