@@ -1,0 +1,11 @@
+title = "Marketplace Catalog Consolidator secret scanning"
+
+[extend]
+useDefault = true
+
+# Exclude generated local output only. Source, tests, examples, and docs are scanned.
+[[allowlists]]
+description = "Generated build output and local tooling"
+paths = [
+  '''(^|[\\/])(bin|obj|\.venv|\.git|TestResults|artifacts|coverage)[\\/]'''
+]

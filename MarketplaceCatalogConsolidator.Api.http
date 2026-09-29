@@ -1,0 +1,35 @@
+@baseUrl = http://localhost:5000
+@apiKey =
+@requestId = 9d0df985-610c-4e54-8d50-519e972a42a6
+@uploadId = 00000000-0000-4000-8000-000000000001
+
+### Upload a product catalog JSON file
+POST {{baseUrl}}/api/v1/uploads
+Idempotency-Key: {{requestId}}
+X-Api-Key: {{apiKey}}
+Content-Type: multipart/form-data; boundary=UploadBoundary
+
+--UploadBoundary
+Content-Disposition: form-data; name="file"; filename="ProductEntry.json"
+Content-Type: application/json
+
+< ./ProductEntry.json
+--UploadBoundary--
+
+### Public upload history (no API key)
+GET {{baseUrl}}/api/v1/uploads?page=1&pageSize=25
+
+### Persisted status and ordered items (set uploadId from acceptance response)
+GET {{baseUrl}}/api/v1/uploads/{{uploadId}}/status?page=1&pageSize=50
+
+### Immutable report (409 until finalization)
+GET {{baseUrl}}/api/v1/uploads/{{uploadId}}/report
+
+### Canonical catalog and seller offers
+GET {{baseUrl}}/api/v1/catalog?category=Electronics&brand=Samsung&name=Galaxy&page=1&pageSize=25
+
+### Liveness
+GET {{baseUrl}}/api/v1/health
+
+### Storage/database readiness
+GET {{baseUrl}}/api/v1/ready
