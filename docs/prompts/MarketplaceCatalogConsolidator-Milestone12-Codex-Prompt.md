@@ -73,14 +73,14 @@ Use the public digest-pinned GHCR image. Configure the existing application thro
 
 Do not enable the development placeholder API-key setting in Azure. Do not mount storage anywhere other than the existing intended `/home` path. Do not assume `/home` persistence: verify it after deployment.
 
-Use workload identity federation / OIDC for any GitHub Actions Azure login. Do not add a publish profile, client secret, personal access token, or Azure credential to the repository. If the required GitHub secrets or Azure federated credential are absent, document the exact non-secret setup steps and stop for Samuel rather than weakening authentication.
+Use the locally authenticated operator workflow in `infra/azure/Deploy-AppServiceF1.ps1`. Azure authentication must use the operator's interactive Azure CLI session; GHCR authentication must use Docker's interactive login prompt; GitHub package visibility is managed through the authenticated GitHub CLI session. Do not store an Azure credential, GHCR token, API key, publish profile, or client secret in the repository, command line, or deployment logs.
 
 ## Deployment sequence and pull-request discipline
 
 1. Create a feature branch, add the deployment-only files, and open a pull request. Do not merge it.
 2. Run locally safe checks for the added scripts/workflow syntax. Build the container only after the F1 gate permits it.
 3. Hand off the PR for Samuel to review and merge.
-4. **Only after Samuel confirms the deployment PR is merged**, resume from updated `main` and execute the documented manual workflow or deployment script. Do not deploy an image built from a PR branch.
+4. **Only after Samuel confirms the deployment PR is merged**, resume from updated `main` and execute `infra/azure/Deploy-AppServiceF1.ps1`. Do not deploy an image built from a PR branch.
 5. Make no other repository changes during the execution phase.
 
 If a live Azure deployment must be split into a follow-up turn after merge, stop with a crisp checklist of the one-time inputs/permissions needed and wait.
