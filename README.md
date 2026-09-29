@@ -3,13 +3,13 @@
 # Marketplace Catalog Consolidator
 
 [![Milestone](https://img.shields.io/badge/milestone-7-blue)](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/milestones)
-[![Tests](https://img.shields.io/badge/tests-96%20passing-brightgreen)](tests)
+[![Tests](https://img.shields.io/badge/tests-126%20passing-brightgreen)](tests)
 [![CI](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/actions/workflows/ci.yml)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![Docker](https://img.shields.io/badge/Docker-containerized-2496ED?logo=docker)](Dockerfile)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-Marketplace Catalog Consolidator is a .NET 10 API for consolidating seller product catalogs into a canonical SQLite catalog. The project is being delivered incrementally against [the solution design](MarketplaceCatalogConsolidator-Solution-Design.md). Milestone 7 includes authenticated uploads, public read APIs and Swagger, operational hardening, and repository governance. Docker/Azure work is reserved for the final deployment milestone.
+Marketplace Catalog Consolidator is a .NET 10 API for consolidating seller product catalogs into a canonical SQLite catalog. The project is being delivered incrementally against [the solution design](docs/MarketplaceCatalogConsolidator-Solution-Design.md). Milestone 7 includes authenticated uploads, public read APIs and Swagger, operational hardening, and repository governance. Docker/Azure work is reserved for the final deployment milestone.
 
 ## Architecture
 
@@ -111,7 +111,7 @@ Infrastructure consumers can use `FileSystemStoragePaths`, `SqliteWorkingDatabas
 
 ## Verification
 
-All changes follow **feature branch -> pull request -> user review -> user merge to main**. Do not push project code directly to `main`, merge on the user's behalf, or enable auto-merge. See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+All changes follow **feature branch -> pull request -> user review -> user merge to main**. Do not push project code directly to `main`, merge on the user's behalf, or enable auto-merge. See [CONTRIBUTING.md](docs/CONTRIBUTING.md) and [SECURITY.md](docs/SECURITY.md). Repository guidance and the manual PR template are in [AGENTS.md](docs/AGENTS.md) and [pull_request_template.md](docs/pull_request_template.md).
 
 Run the repository verification script from the repository root:
 
