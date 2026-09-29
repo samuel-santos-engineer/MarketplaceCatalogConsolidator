@@ -19,6 +19,55 @@ namespace MarketplaceCatalogConsolidator.IntegrationTests;
 public sealed class PublicReadEndpointTests
 {
     [Fact]
+    public async Task RandomUuidIsPublicFreshCanonicalVersionFourAndDoesNotTouchStorage()
+    {
+        using var fixture = new Fixture();
+        static string[] Snapshot(string root) => Directory.GetFiles(root, "*", SearchOption.AllDirectories)
+            .Order(StringComparer.Ordinal)
+            .Select(path => Path.GetRelativePath(root, path) + ":" + Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))))
+            .ToArray();
+        var before = Snapshot(fixture.Paths.RootDirectory);
+        // A stateless request must not wait for or acquire the storage gate.
+        await using var lease = await fixture.Factory.Services.GetRequiredService<IWorkflowLock>().AcquireAsync();
+        var values = new List<string>();
+        for (var index = 0; index < 2; index++)
+        {
+            using var response = await fixture.Client.GetAsync("/api/v2/random-uuid").WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+            Assert.Equal("nosniff", Assert.Single(response.Headers.GetValues("X-Content-Type-Options")));
+            using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Single(json.RootElement.EnumerateObject());
+            var uuid = json.RootElement.GetProperty("uuid").GetString();
+            Assert.NotNull(uuid);
+            Assert.True(Guid.TryParseExact(uuid, "D", out var parsed));
+            Assert.Equal(parsed.ToString("D"), uuid);
+            Assert.Equal('4', uuid[14]);
+            Assert.Contains(uuid[19], new[] { '8', '9', 'a', 'b' });
+            values.Add(uuid);
+        }
+        Assert.NotEqual(values[0], values[1]);
+        await lease.DisposeAsync();
+        Assert.Equal(before, Snapshot(fixture.Paths.RootDirectory));
+    }
+
+    [Fact]
+    public async Task RandomUuidOpenApiDocumentsOnlyPublicGetAndExpectedResponses()
+    {
+        using var fixture = new Fixture();
+        using var json = await fixture.GetJsonAsync("/openapi/v1.json");
+        var route = json.RootElement.GetProperty("paths").GetProperty("/api/v2/random-uuid");
+        Assert.Single(route.EnumerateObject());
+        var operation = route.GetProperty("get");
+        Assert.Equal("GenerateRandomUuid", operation.GetProperty("operationId").GetString());
+        Assert.Equal("Generate a random UUID v4", operation.GetProperty("summary").GetString());
+        Assert.Equal(new[] { "200", "429", "500" }, operation.GetProperty("responses").EnumerateObject().Select(item => item.Name).Order(StringComparer.Ordinal));
+        Assert.False(operation.TryGetProperty("requestBody", out _));
+        if (operation.TryGetProperty("parameters", out var parameters)) Assert.Empty(parameters.EnumerateArray());
+        if (operation.TryGetProperty("security", out var security)) Assert.Empty(security.EnumerateArray());
+    }
+
+    [Fact]
     public async Task UploadListOrdersTiesFiltersAndHidesSensitiveData()
     {
         using var fixture = new Fixture();
