@@ -1,4 +1,12 @@
+![Marketplace Catalog Consolidator project banner](img/MarketplaceCatalogConsolidatorBanner-01.jpg)
+
 # Marketplace Catalog Consolidator
+
+[![Milestone](https://img.shields.io/badge/milestone-7-blue)](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/milestones)
+[![Tests](https://img.shields.io/badge/tests-96%20passing-brightgreen)](tests)
+[![CI](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/actions/workflows/ci.yml)
+[![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dotnet.microsoft.com/download/dotnet/10.0)
+[![Docker](https://img.shields.io/badge/Docker-containerized-2496ED?logo=docker)](Dockerfile)
 
 Marketplace Catalog Consolidator is a .NET 10 API for consolidating seller product catalogs into a canonical SQLite catalog. The project is being delivered incrementally against [the solution design](MarketplaceCatalogConsolidator-Solution-Design.md). Milestone 7 includes authenticated uploads, public read APIs and Swagger, operational hardening, and repository governance. Docker/Azure work is reserved for the final deployment milestone.
 
@@ -58,14 +66,15 @@ Swagger UI is public at `/swagger/`; the OpenAPI document is at `/openapi/v1.jso
 
 All GET routes below are public and require no API-key header. In Swagger, expand a GET operation and select **Try it out**; only the POST needs credentials.
 
+
 | Route | Queries and response |
 | --- | --- |
-| `GET /api/v1/uploads` | Optional `status`, `page=1`, `pageSize=25`. Returns upload attempts ordered by start instant descending, then ID descending. Status accepts named upload states, case-insensitively. |
-| `GET /api/v1/uploads/{uploadId}/status` | `page=1`, `pageSize=50`. Returns `upload` metadata, `traceId`, safe failure code/message, and paginated `items` ordered by source index. |
-| `GET /api/v1/uploads/{uploadId}/report` | Downloads the final immutable report as `application/json` with attachment filename `{uploadId}.json`. |
-| `GET /api/v1/catalog` | Optional `category`, `brand`, `name`, `sellerName`, `page=1`, `pageSize=25`. Returns canonical products ordered by ID ascending, each with `sellerOffers`. |
-| `GET /api/v1/health` | Returns `200 {"status":"healthy"}` without database/filesystem checks. |
-| `GET /api/v1/ready` | Returns `200 {"status":"ready"}` when the existing SQLite database opens with foreign keys enabled and staging/report roots accept temporary flushed writes; otherwise `503 not_ready`. Probe files are deleted on close. |
+| `GET /api/v1/uploads` | Optional `status`, `page=1`, `pageSize=25`. Returns upload attempts ordered by start time descending, then ID descending. |
+| `GET /api/v1/uploads/{uploadId}/status` | `page=1`, `pageSize=50`. Returns upload metadata, trace ID, safe failure details, and items ordered by source index. |
+| `GET /api/v1/uploads/{uploadId}/report` | Downloads the immutable final report as `application/json`. |
+| `GET /api/v1/catalog` | Optional category, brand, name, and seller filters; page defaults to 1 and page size to 25. |
+| `GET /api/v1/health` | Returns `200` without database or filesystem checks. |
+| `GET /api/v1/ready` | Returns `200` when SQLite and storage are available; otherwise `503`. |
 
 Pagination responses contain `items`, `pageNumber`, `pageSize`, and `totalCount`. Pages must be positive integers; page size is 1–100 on all paginated routes. Invalid values return `400 invalid_pagination`; an unsupported upload-state filter returns `400 invalid_status`. Pages beyond the result set return an empty `items` array. Offset pagination is stable for unchanged data; new uploads or catalog changes can move subsequent pages.
 
@@ -86,13 +95,14 @@ GET /api/v1/ready
 
 Configuration keys:
 
+
 | Environment variable | Purpose |
 | --- | --- |
-| `Security__ApiKey` | Required upload credential; never place in source control, logs, reports, query strings, or OpenAPI examples |
-| `Development__UsePlaceholderApiKey` | Explicit opt-in to the public local placeholder, accepted only in Development |
-| `Catalog__StorageRoot` | Persistent data root, including the working `catalog.db`, staged uploads, and reports; consumed by startup and file adapters; defaults to `/home/data` on Linux and the user's local application data directory on Windows |
-| `Catalog__StarterDatabasePath` | Optional path to the immutable starter database; consumed by bootstrap and defaults to `catalog.db` beside the running application |
-| `ASPNETCORE_HTTP_PORTS` | HTTP listener port; container baseline uses `8080` |
+| `Security__ApiKey` | Required upload credential; never place in source control, logs, reports, query strings, or OpenAPI examples. |
+| `Development__UsePlaceholderApiKey` | Explicit opt-in to the public local placeholder, accepted only in Development. |
+| `Catalog__StorageRoot` | Persistent data root for the working catalog, staged uploads, and reports. |
+| `Catalog__StarterDatabasePath` | Optional path to the immutable starter database. |
+| `ASPNETCORE_HTTP_PORTS` | HTTP listener port; the container baseline uses `8080`. |
 
 Infrastructure consumers can use `FileSystemStoragePaths`, `SqliteWorkingDatabaseBootstrapper`, and `SqliteDatabaseMigrator` to initialize storage. At startup, `Processing` uploads return to `Queued` while their committed item outcomes remain persisted; the worker skips those indexes when resuming. Each valid item's product change, seller link, and `UploadItem` result share one transaction. When processing finishes, durable counts and intended outcome are stored as `ReportPending`; the report is atomically published, read back, and hashed before the upload receives its terminal state. Report failures remain retryable. For local upload testing, set `Security__ApiKey` in the shell environment. The deployed app must be HTTPS-only at its ingress.
 
