@@ -2,108 +2,91 @@
 
 ## Goal
 
-Add a small, polished, framework-free browser UI that consumes the existing API. It must use only new static HTML, CSS, and JavaScript files served by the existing ASP.NET Core static-files middleware.
+Add one focused **test-only** integration test proving the supplied 269-entry fixture succeeds through the real HTTP boundary and preserves the catalog-consolidation invariants.
 
-The UI has two pages:
+This replaces the previously planned Milestone 10 UI work. The static HTML UI becomes the future Milestone 11.
 
-1. **Products** - query and paginate the public catalog.
-2. **Uploads** - submit a JSON file, browse upload attempts, open an immutable report, and render a selected report’s summary and item table.
+## Branch and scope rules
 
-## Non-negotiable change boundary
+- Start from current `main` and confirm a clean working tree.
+- Create branch `test/supplied-fixture-http-end-to-end`.
+- Change only test source files under `tests/MarketplaceCatalogConsolidator.IntegrationTests/`. Prefer adding one new clearly named test file rather than editing production code.
+- Do not change API/Application/Domain/Infrastructure production code, database migrations, artifact inputs, configuration, README/design documents, CI, Docker, Azure resources, or existing endpoint contracts.
+- Do not run Docker, publish an image, or do Azure work.
+- Commit, push, and open one PR. Do not merge, enable auto-merge, or commit directly to `main`.
 
-**Do not modify, move, rename, format, regenerate, or delete any existing file.**
+## Test scenario
 
-Only add new files beneath this exact directory:
+Implement an integration test using the actual ASP.NET Core test host and the actual `POST /api/v1/uploads` endpoint. It must not call the worker, parser, processor, or SQLite stores directly to bypass HTTP acceptance.
+
+Use the committed `artifacts/ProductEntry.json` fixture exactly as the uploaded multipart `file`. It contains 269 entries and is below the server size limit.
+
+Configure the test host with an isolated temporary `Catalog:StorageRoot`, the actual immutable `artifacts/catalog.db` as `Catalog:StarterDatabasePath`, and a test-only `Security:ApiKey`. Use the normal hosted worker; do not replace it with an idle/fake processor.
+
+### Required flow
+
+1. Before submission, calculate and retain a SHA-256 hash of the immutable starter database.
+2. Capture the starter baseline from the working database after normal bootstrap/migration:
+   - verify 975 initial `Product` rows and zero `SellerProduct` rows;
+   - record counts for every **complete** normalized product identity (`NormalizedBrand`, `NormalizedName`, `NormalizedCategory` all non-null).
+3. Send a real multipart POST with one JSON file, a fresh UUID v4 `Idempotency-Key`, and the test API key.
+4. Assert `202 Accepted`, parse the returned upload ID, and poll the public status endpoint using a bounded deterministic timeout until the upload is terminal and `reportAvailable` is true. Do not use unbounded waits or arbitrary long sleeps.
+5. Download the immutable report from `GET /api/v1/uploads/{uploadId}/report` and use its actual contract fields for assertions.
+
+## Required assertions
+
+### HTTP and report lifecycle
+
+- The request is accepted through the real HTTP endpoint.
+- The final report is valid JSON for that upload and has exactly 269 item outcomes.
+- `received == 269` and `approved + cleaned + rejected == received` in both durable upload metadata and the immutable report.
+- The downloaded report identity/status/counts agree with the final public status response.
+
+### Corrected canonical-identity invariant
+
+Do **not** assert that every final product identity is globally unique. The supplied starter catalog may already contain historical duplicate normalized identities, and this application deliberately does not destructively merge existing catalog rows.
+
+Instead, for every complete normalized identity after import, assert:
 
 ```text
-src/MarketplaceCatalogConsolidator.Api/wwwroot/
+postImportCount <= max(baselineCount, 1)
 ```
 
-Before editing, inspect the directory. Do not overwrite an existing file, including the existing Swagger assets. If a required target filename already exists, stop and report the conflict rather than changing it.
+This proves the import did not introduce a second canonical product for any complete identity while still allowing a previously absent identity to be created once. Document this baseline-aware meaning in the test name/comments only; do not change documentation files in this test-only PR.
 
-At handoff, prove the boundary with `git diff --name-status main...HEAD`: every changed path must have status `A` and must be below the directory above. Do not change C#, project files, tests, API contracts, configuration, Docker files, documentation, dependencies, package files, or CI.
+### Expected seller-link set
 
-## Branch and delivery rules
+The starter table has zero seller links. Derive the expected set from the final report’s accepted item outcomes (`Approved` and `Cleaned`) using the **actual cleaned/canonical seller name and source product ID fields defined by the report contract**.
 
-- Start from current `main` with a clean working tree.
-- Create branch `feat/static-catalog-ui`.
-- Commit only the new static files, push the branch, and open one pull request.
-- Do not merge, enable auto-merge, run Docker, publish an image, or do Azure work.
-- Stop after opening the PR for human review.
+Assert that the final `SellerProduct` set exactly equals that expected set:
 
-## Required new files
+- each expected `(SellerName, SellerProductId)` appears exactly once;
+- its `ProductId` equals that item’s reported matched/canonical product ID;
+- no extra seller link exists;
+- rejected outcomes do not create an additional seller link. If a rejected duplicate shares a seller/source ID with an accepted earlier item, the assertion must correctly treat the accepted link as the single expected row.
 
-Use clear names, for example:
+### Immutable input
 
-```text
-wwwroot/index.html
-wwwroot/uploads.html
-wwwroot/css/catalog-ui.css
-wwwroot/js/catalog-ui.js
-wwwroot/js/uploads-ui.js
+- Recalculate the starter database SHA-256 after processing and assert it matches the original hash.
+- Assert all runtime data remains under the isolated temporary working root, not the repository artifact directory.
+
+## Test quality
+
+- Reuse existing fixture/test-host conventions and helper types where practical, but keep isolation, disposal, and timeout handling robust.
+- Query SQLite only for baseline/post-import verification. Never manipulate rows to make the scenario pass.
+- Do not hard-code outcome totals other than the known input count of 269; derive approved/cleaned/rejected expectations from the returned report.
+- The test must be deterministic and safe to run in parallel with the existing suite.
+- Keep the existing full test suite unchanged except for the added coverage.
+
+## Verification and handoff
+
+Run:
+
+```powershell
+dotnet format MarketplaceCatalogConsolidator.sln --no-restore
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify.ps1
+gitleaks dir . --config .gitleaks.toml --redact --no-banner
+gitleaks git . --config .gitleaks.toml --redact --no-banner
 ```
 
-You may add other **new** static files only when necessary. Do not use a framework, build system, package manager, CDN, external JavaScript/CSS, chart library, icon library, or server-side template.
-
-## Shared UI requirements
-
-- Use semantic HTML, UTF-8, responsive layout, keyboard-visible focus states, accessible labels, and live regions for loading/success/error messages.
-- Use a restrained blue-pastel visual system: pale blue background, white/light-blue cards, blue navigation/primary actions, high-contrast dark text, and clearly distinct success/warning/error colors. Respect `prefers-reduced-motion`.
-- Provide the same simple top navigation on both pages: **Products** (`/`) and **Uploads** (`/uploads.html`). Keep Swagger separate; do not alter it.
-- Use only same-origin relative API URLs. Do not add CORS configuration.
-- Use `fetch`, `URLSearchParams`, `AbortController`, and DOM construction with `textContent`; never inject API values with `innerHTML`.
-- Show safe, human-readable HTTP/network failures. Never display or log API-key values, request headers, or raw file contents.
-
-## Products page
-
-Build the landing page at `/` using `GET /api/v1/catalog`.
-
-- Provide filters for category, brand, product name, and seller name.
-- Provide Search and Reset controls. Submitting/changing filters resets to page 1.
-- Call the API with `category`, `brand`, `name`, `sellerName`, `page`, and `pageSize`; omit blank filters.
-- Render a responsive table of the returned canonical products with columns appropriate to the actual response: ID, name, brand, category, and seller offers.
-- Render seller offers safely as readable text (for example seller name and source product ID in a compact list), without duplicating product rows.
-- Implement previous/next controls, current page, total count, disabled boundary states, loading state, empty state, and errors. Use the API’s returned `pageNumber`, `pageSize`, and `totalCount`; do not invent totals.
-- Abort a stale request when a newer search is started.
-
-## Uploads page
-
-### Upload form
-
-Add a clearly labelled upload form that calls the existing `POST /api/v1/uploads` endpoint.
-
-- File input accepts `.json` only and explains the server-enforced strictly-less-than-500,000-byte limit.
-- API-key input is `type="password"`, labelled as required for upload only, and is held only in the input/JavaScript memory for the current page. Do not use localStorage, sessionStorage, cookies, URLs, page markup, console logs, or examples containing a real secret.
-- Generate a fresh UUID v4 for `Idempotency-Key` via `crypto.randomUUID()`; if unavailable, request existing `GET /api/v2/random-uuid`. Display the generated key only as a normal UI value that the user may copy/regenerate before submitting; do not persist it.
-- Submit one multipart `file` part with headers `X-Api-Key` and `Idempotency-Key`.
-- Client-side checks improve usability but do not replace server validation: require a selected `.json` file and reject files at or above 500,000 bytes before sending.
-- On `202 Accepted`, show the returned upload ID/status and refresh the upload list. Respect a `Location` header if returned. On a duplicate idempotent response, present its returned upload information without treating it as a client failure.
-- Do not attempt to read or parse the selected JSON file in the browser.
-
-### Upload attempt list
-
-Consume public `GET /api/v1/uploads`.
-
-- Provide a status filter plus pagination with the same robust behavior as the products page.
-- Render each upload’s ID, filename, status, start/completion times, received/approved/cleaned/rejected counts, and report availability.
-- For every upload, provide a report link with exact path `/api/v1/uploads/{uploadId}/report`. It may open in a new tab. When a report is not yet available, communicate that clearly and still provide a status link to `/api/v1/uploads/{uploadId}/status`.
-- Provide a **View in page** control for finalized reports. Its URL state should be `uploads.html?uploadId=<UUID>` so it is shareable and browser navigation works.
-
-### Selected report view
-
-When `uploadId` is present, request `/api/v1/uploads/{uploadId}/report`.
-
-- If the report is available, render a clear report heading (file name/upload ID/status/timestamps), then a small summary table with received, approved, cleaned, and rejected counts.
-- Render a pie chart without any library: use accessible HTML/CSS (for example a `conic-gradient`) plus a labelled legend. The chart and legend must derive directly from the report summary counts. Include a textual summary so the data remains available without color perception or CSS.
-- Below the summary, render a simple responsive item table using the report items. Include source ID, seller, name, brand, category, status, and action taken. Values must be inserted with `textContent`.
-- If the report is pending (`409`) or unavailable, show an explanatory state and link back to the upload status endpoint; do not fabricate report data.
-- Validate `uploadId` as a UUID before requesting it. Invalid URL input must not be interpolated into the DOM or endpoint path.
-
-## Scope and quality checks
-
-- Re-read the current live OpenAPI or existing endpoint response contracts before coding; use their actual JSON property names.
-- Do not create endpoints or change any backend behavior.
-- Manually run the API locally and verify Products, Uploads, upload validation, a successful upload with the configured Development placeholder, pagination, report link/download, in-page report table, and pie-chart count reconciliation.
-- Verify at narrow and wide viewport widths, keyboard navigation, and browser refresh/back navigation on `uploads.html?uploadId=...`.
-- Run the existing repository verifier only if it does not modify tracked files. Report its result.
-- In the PR handoff, include the PR URL, branch, commit SHA, new-file inventory, manual browser evidence, verifier result, and the `git diff --name-status main...HEAD` proof that every change is an allowed addition.
+Also run the focused new test once and report its exact result. In the handoff provide the PR URL, branch, commit SHA, changed test files, new total test count, verification results, and confirmation that no production code, Docker, or Azure operation changed. Stop for review; do not merge.
