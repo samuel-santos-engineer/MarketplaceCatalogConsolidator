@@ -141,11 +141,17 @@ if (-not ($locations | Where-Object { $_.name -eq 'West Central US' })) {
 
 $subscriptionId = $account.id
 $appNameRequest = @{ name = $AppName; type = 'Microsoft.Web/sites' } | ConvertTo-Json -Compress
-$availability = Invoke-AzJson @(
-    'rest', '--method', 'post',
-    '--url', "https://management.azure.com/subscriptions/$subscriptionId/providers/Microsoft.Web/checknameavailability?api-version=2024-04-01",
-    '--headers', 'Content-Type=application/json', '--body', $appNameRequest, '--output', 'json'
-)
+$armToken = & az account get-access-token --resource https://management.azure.com/ --query accessToken --output tsv
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($armToken)) {
+    throw 'Could not obtain an in-memory Azure Resource Manager token for the read-only name check.'
+}
+try {
+    $availabilityUri = "https://management.azure.com/subscriptions/$subscriptionId/providers/Microsoft.Web/checknameavailability?api-version=2024-04-01"
+    $availability = Invoke-RestMethod -Method Post -Uri $availabilityUri -Headers @{ Authorization = "Bearer $armToken" } -ContentType 'application/json' -Body $appNameRequest
+}
+finally {
+    $armToken = $null
+}
 if (-not $availability.nameAvailable) {
     throw "App Service name '$AppName' is unavailable; no image or Azure resource was created."
 }
