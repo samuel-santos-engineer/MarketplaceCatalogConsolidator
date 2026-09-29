@@ -1,5 +1,6 @@
 using System.Globalization;
 using MarketplaceCatalogConsolidator.Application.Ports;
+using MarketplaceCatalogConsolidator.Application.Workflow;
 using MarketplaceCatalogConsolidator.Domain;
 using Microsoft.Data.Sqlite;
 
@@ -27,8 +28,8 @@ public sealed class SqliteConsolidationItemStore(SqliteConnectionFactory connect
             return duplicateResult;
         }
 
-        var canonicalBrand = await ResolveCanonicalValueAsync(connection, transaction, candidate.Brand, "Brand", cancellationToken).ConfigureAwait(false);
-        var canonicalCategory = await ResolveCanonicalValueAsync(connection, transaction, candidate.Category, "Category", cancellationToken).ConfigureAwait(false);
+        var canonicalBrand = CreateIdentityValue(candidate.Brand);
+        var canonicalCategory = CreateIdentityValue(candidate.Category);
         var normalizedName = TextNormalization.NormalizeForComparison(candidate.Name);
         long productId;
         var outcomeName = candidate.Name;
@@ -46,7 +47,7 @@ public sealed class SqliteConsolidationItemStore(SqliteConnectionFactory connect
             if (match is not null)
             {
                 productId = match.Value.Id;
-                outcomeName = match.Value.Name;
+                outcomeName = SourceTextCleaner.Clean(match.Value.Name) ?? candidate.Name;
             }
             else
             {
@@ -87,37 +88,8 @@ public sealed class SqliteConsolidationItemStore(SqliteConnectionFactory connect
             : null;
     }
 
-    private static async Task<CanonicalValue?> ResolveCanonicalValueAsync(
-        SqliteConnection connection,
-        SqliteTransaction transaction,
-        string? value,
-        string field,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        var normalizedInput = TextNormalization.NormalizeForComparison(value);
-        var column = field == "Brand" ? "Brand" : "Category";
-        var normalizedColumn = field == "Brand" ? "NormalizedBrand" : "NormalizedCategory";
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-        command.CommandText = $"SELECT DISTINCT {column}, {normalizedColumn} FROM Product WHERE {column} IS NOT NULL ORDER BY {column};";
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-        {
-            var displayValue = reader.GetString(0);
-            var normalizedValue = reader.IsDBNull(1) ? TextNormalization.NormalizeForComparison(displayValue) : reader.GetString(1);
-            if (string.Equals(normalizedInput, normalizedValue, StringComparison.Ordinal))
-            {
-                return new CanonicalValue(displayValue, normalizedValue);
-            }
-        }
-
-        return null;
-    }
+    private static CanonicalValue? CreateIdentityValue(string? value) =>
+        value is null ? null : new CanonicalValue(value, TextNormalization.NormalizeForComparison(value));
 
     private static async Task<(long Id, string Name)?> FindProductAsync(
         SqliteConnection connection,
@@ -243,7 +215,7 @@ public sealed class SqliteConsolidationItemStore(SqliteConnectionFactory connect
     {
         if (!string.Equals(before, after, StringComparison.Ordinal))
         {
-            changes.Add($"{field}: {FormatValue(before)} -> {FormatValue(after)}");
+            changes.Add($"{field}: {after ?? "NULL"}");
         }
     }
 
@@ -252,12 +224,8 @@ public sealed class SqliteConsolidationItemStore(SqliteConnectionFactory connect
         var action = createdProduct
             ? $"Created Product {productId} and linked seller {sellerName}."
             : $"Linked seller {sellerName} to existing product {productId}.";
-        return changes.Count == 0 ? action : $"{string.Join("; ", changes)}; {action}";
+        return changes.Count == 0 ? action : $"{string.Join("; ", changes)} {action}";
     }
-
-    private static string FormatValue(string? value) => value is null
-        ? "NULL"
-        : $"\"{value.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal).Replace("\r", "\\r", StringComparison.Ordinal).Replace("\n", "\\n", StringComparison.Ordinal)}\"";
 
     private sealed record CanonicalValue(string DisplayValue, string NormalizedValue);
 }

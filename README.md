@@ -28,6 +28,8 @@ The solution targets `net10.0` and includes API, Application, Domain, Infrastruc
 
 The root `catalog.db` is an immutable assessment input and must remain unchanged. Bootstrap copies it to a separate working database before migration. The supplied database has 975 `Product` rows and no `SellerProduct` links; migration preserves legacy seller rows and changes `SellerProduct.SellerProductId` to `TEXT NOT NULL`. For seller rows from older schemas, newly required audit fields unavailable in the source are marked with a deterministic `legacy:<row-id>` fingerprint and the Unix epoch timestamp. Migration history is stored in `SchemaMigration`, and product identity keys are normalized for matching. `ProductEntry.json` contains 269 entries.
 
+Source cleaning is centralized in `SourceTextCleaner`: preserve Unicode letters/digits and visible ASCII (including quotes, apostrophes, hyphens, and decimal points), remove other characters, and collapse whitespace. Category alias `Photo` becomes `Photography`, and source GUIDs use canonical D format. Valid seller names, brands, and categories remain intact even when absent from the catalog. Accepted items are `Approved` when all reported values remain unchanged and `Cleaned` when any value changes. Cleaning actions show the changed field and final value, for example `Name: Smartphone Galaxy S23 Linked seller FitnessCenter to existing product 2.` Raw fields preserve the original input, and JSON may encode quotes as `\u0022` or apostrophes as `\u0027` without changing their values.
+
 ## Prerequisites
 
 - .NET SDK 10.0.103 baseline (pinned by `global.json`, with .NET 10 feature-band roll-forward enabled)
