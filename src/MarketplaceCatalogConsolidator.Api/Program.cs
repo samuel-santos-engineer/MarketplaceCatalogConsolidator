@@ -55,6 +55,7 @@ app.MapOpenApi("/openapi/v1.json").RequireRateLimiting(ApiHardening.ReadPolicy);
 app.MapUploadEndpoints();
 app.MapPublicReadEndpoints();
 app.MapLabResetEndpoints();
+app.MapUtilityEndpoints();
 
 var paths = app.Services.GetRequiredService<IStoragePaths>();
 ApiHardening.ValidateRuntimeConfiguration(builder.Configuration, app.Environment, paths);

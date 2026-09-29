@@ -2,14 +2,14 @@
 
 # Marketplace Catalog Consolidator
 
-[![Milestone](https://img.shields.io/badge/milestone-8-blue)](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/milestones)
-[![Tests](https://img.shields.io/badge/tests-144%20passing-brightgreen)](tests)
+[![Milestone](https://img.shields.io/badge/milestone-9-blue)](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/milestones)
+[![Tests](https://img.shields.io/badge/tests-146%20passing-brightgreen)](tests)
 [![CI](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/samuel-santos-engineer/MarketplaceCatalogConsolidator/actions/workflows/ci.yml)
 [![.NET](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dotnet.microsoft.com/download/dotnet/10.0)
 [![Docker](https://img.shields.io/badge/Docker-containerized-2496ED?logo=docker)](Dockerfile)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-Marketplace Catalog Consolidator is a .NET 10 API for consolidating seller product catalogs into a canonical SQLite catalog. The project is being delivered incrementally against [the solution design](docs/MarketplaceCatalogConsolidator-Solution-Design.md). Milestone 8 adds authenticated lab reset to the existing upload, public read, Swagger, and operational features. Docker/Azure work is reserved for the final deployment milestone.
+Marketplace Catalog Consolidator is a .NET 10 API for consolidating seller product catalogs into a canonical SQLite catalog. The project is being delivered incrementally against [the solution design](docs/MarketplaceCatalogConsolidator-Solution-Design.md). Milestone 9 adds a public UUID v4 generator to the existing upload, lab reset, public read, Swagger, and operational features. Docker/Azure work is reserved for the final deployment milestone.
 
 ## Architecture
 
@@ -24,7 +24,7 @@ The API project is the composition root and may reference Infrastructure for dep
 
 ## Current status
 
-The solution targets `net10.0` and includes API, Application, Domain, Infrastructure, UnitTests, and IntegrationTests projects. The API exposes eight versioned routes documented below. Startup initializes storage under the shared workflow gate, completes any interrupted lab reset, applies migrations, recovers interrupted uploads, and resumes pending report finalizations before running the host. One hosted consolidation worker polls at a bounded interval and uses the data-root gate plus an atomic SQLite claim to serialize work across service instances sharing that root. The production item processor validates and cleans source entries, preserves valid brand/category values, strictly matches products, writes seller offers, and commits each item outcome atomically with its catalog changes. Terminal outcomes are persisted only after an immutable report is published and verified.
+The solution targets `net10.0` and includes API, Application, Domain, Infrastructure, UnitTests, and IntegrationTests projects. The API exposes nine versioned routes documented below. Startup initializes storage under the shared workflow gate, completes any interrupted lab reset, applies migrations, recovers interrupted uploads, and resumes pending report finalizations before running the host. One hosted consolidation worker polls at a bounded interval and uses the data-root gate plus an atomic SQLite claim to serialize work across service instances sharing that root. The production item processor validates and cleans source entries, preserves valid brand/category values, strictly matches products, writes seller offers, and commits each item outcome atomically with its catalog changes. Terminal outcomes are persisted only after an immutable report is published and verified.
 
 The root `catalog.db` is an immutable assessment input and must remain unchanged. Bootstrap copies it to a separate working database before migration. The supplied database has 975 `Product` rows and no `SellerProduct` links; migration preserves legacy seller rows and changes `SellerProduct.SellerProductId` to `TEXT NOT NULL`. For seller rows from older schemas, newly required audit fields unavailable in the source are marked with a deterministic `legacy:<row-id>` fingerprint and the Unix epoch timestamp. Migration history is stored in `SchemaMigration`, and product identity keys are normalized for matching. `ProductEntry.json` contains 269 entries.
 
@@ -64,6 +64,16 @@ dotnet run --project src/MarketplaceCatalogConsolidator.Api
 ```
 
 Swagger UI is public at `/swagger/`; the OpenAPI document is at `/openapi/v1.json`. `POST /api/v1/uploads` accepts exactly one `file` part containing a UTF-8 JSON array, strictly smaller than 500,000 bytes, and requires `Idempotency-Key` (UUID v4) plus `X-Api-Key`. The API key is supplied through `Security__ApiKey` configuration/environment only and is compared in constant time. A newly accepted upload returns `202 Accepted` with upload ID, current status, display filename, SHA-256, and a `Location` header pointing to the live `/api/v1/uploads/{uploadId}/status` endpoint. Missing or invalid credentials return the same `401` response. Invalid multipart/JSON or idempotency headers return `400`, content types other than multipart return `415`, oversized files return `413`, and a reused idempotency key with different bytes returns `409`. Every error has `traceId`, `code`, and `message`. Repeating a key with identical bytes returns the same upload. The background worker handles accepted uploads and writes their immutable report. Do not commit local environment files or secret-bearing settings.
+
+## Public random UUID (Milestone 9)
+
+`GET /api/v2/random-uuid` returns a fresh RFC 4122 UUID v4 generated server-side by `Guid.NewGuid()` in canonical lowercase D format. It accepts no API-key header, body, or query parameters and accesses no storage/database. It uses the existing public-read rate limit and security/error middleware (`200`, `429`, safe `500`).
+
+```powershell
+Invoke-RestMethod -Uri 'http://localhost:5254/api/v2/random-uuid'
+```
+
+Example response: `{ "uuid": "9d0df985-610c-4e54-8d50-519e972a42a6" }`. Each request generates a new value; you can use it as the UUID v4 upload `Idempotency-Key`.
 
 ## Destructive lab reset (Milestone 8)
 

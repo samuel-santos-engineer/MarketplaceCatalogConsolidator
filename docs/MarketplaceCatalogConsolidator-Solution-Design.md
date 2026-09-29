@@ -48,6 +48,9 @@ Every REST endpoint uses URL-segment versioning. The initial release is `v1`; br
 | `GET /api/v1/catalog`                   | Query the consolidated catalog          | Public  |
 | `GET /api/v1/health`                    | Process liveness                        | Public  |
 | `GET /api/v1/ready`                     | SQLite and persistent-storage readiness | Public  |
+| `GET /api/v2/random-uuid`               | Generate a fresh RFC 4122 UUID v4        | Public  |
+
+Milestone 9's UUID utility returns only `{ "uuid": "..." }`, generated server-side with `Guid.NewGuid().ToString("D")`. It requires no authentication, request body, or query parameters and accesses no storage/database or workflow gate. It uses the existing public-read rate limit and security/global-error middleware. OpenAPI names the operation `GenerateRandomUuid`, summarizes it as "Generate a random UUID v4", and documents only `200`, `429`, and safe `500` responses.
 
 ### 3.1 Upload endpoint
 

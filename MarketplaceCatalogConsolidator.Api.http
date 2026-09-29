@@ -3,6 +3,9 @@
 @requestId = 9d0df985-610c-4e54-8d50-519e972a42a6
 @uploadId = 00000000-0000-4000-8000-000000000001
 
+### Generate a fresh UUID v4 (public; no body, headers, or query parameters)
+GET {{baseUrl}}/api/v2/random-uuid
+
 ### Upload a product catalog JSON file
 POST {{baseUrl}}/api/v1/uploads
 Idempotency-Key: {{requestId}}
