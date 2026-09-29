@@ -362,7 +362,7 @@ public sealed class UploadEndpointTests
             {
                 ["Security:ApiKey"] = ApiKey,
                 ["Catalog:StorageRoot"] = Path.Combine(storageRoot, "data"),
-                ["Catalog:StarterDatabasePath"] = Path.Combine(AppContext.BaseDirectory, "catalog.db")
+                ["Catalog:StarterDatabasePath"] = Path.Combine(AppContext.BaseDirectory, "artifacts", "catalog.db")
             }));
             builder.ConfigureTestServices(services =>
             {

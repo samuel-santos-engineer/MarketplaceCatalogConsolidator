@@ -154,7 +154,7 @@ public sealed class OperationalHardeningTests
             ["Security:ApiKey"] = key,
             ["Development:UsePlaceholderApiKey"] = placeholder.ToString()
         }).Build();
-        var paths = new FileSystemStoragePaths(new CatalogStorageOptions(Path.Combine(Path.GetTempPath(), "separate-test-root"), Path.Combine(AppContext.BaseDirectory, "catalog.db")));
+        var paths = new FileSystemStoragePaths(new CatalogStorageOptions(Path.Combine(Path.GetTempPath(), "separate-test-root"), Path.Combine(AppContext.BaseDirectory, "artifacts", "catalog.db")));
         var hostEnvironment = new TestEnvironment { EnvironmentName = environment };
         if (valid) ApiHardening.ValidateRuntimeConfiguration(configuration, hostEnvironment, paths);
         else
@@ -222,7 +222,7 @@ public sealed class OperationalHardeningTests
             {
                 ["Security:ApiKey"] = ApiKey,
                 ["Catalog:StorageRoot"] = Path.Combine(root, "data"),
-                ["Catalog:StarterDatabasePath"] = Path.Combine(AppContext.BaseDirectory, "catalog.db")
+                ["Catalog:StarterDatabasePath"] = Path.Combine(AppContext.BaseDirectory, "artifacts", "catalog.db")
             }));
             builder.ConfigureTestServices(services =>
             {

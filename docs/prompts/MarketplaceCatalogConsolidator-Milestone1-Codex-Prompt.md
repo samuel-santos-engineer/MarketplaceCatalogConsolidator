@@ -13,7 +13,7 @@ Deliver a safe SQLite working-copy bootstrap, forward-only schema migration, cor
 
 ## Mandatory scope
 
-1. Treat the supplied starter `catalog.db` as immutable. The running database must be a separate working copy in the configured data directory.
+1. Treat the supplied starter `artifacts/catalog.db` as immutable. The running database must be a separate working copy in the configured data directory.
 2. Create the data-path abstraction/configuration needed for local development and the deployed `/home/data` location. Do not create production data inside the repository.
 3. Enable SQLite foreign-key enforcement on every connection.
 4. Implement an idempotent, forward-only migration mechanism. It must record applied migrations and safely migrate a database created from the 975-product starter catalog.

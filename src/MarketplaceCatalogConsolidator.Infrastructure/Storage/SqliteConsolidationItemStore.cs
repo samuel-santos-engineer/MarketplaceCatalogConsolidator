@@ -30,7 +30,7 @@ public sealed class SqliteConsolidationItemStore(SqliteConnectionFactory connect
 
         var canonicalBrand = CreateIdentityValue(candidate.Brand);
         var canonicalCategory = CreateIdentityValue(candidate.Category);
-        var normalizedName = TextNormalization.NormalizeForComparison(candidate.Name);
+        var normalizedName = TextNormalization.NormalizeProductNameForComparison(candidate.Name);
         long productId;
         var outcomeName = candidate.Name;
         var createdProduct = false;
@@ -47,7 +47,12 @@ public sealed class SqliteConsolidationItemStore(SqliteConnectionFactory connect
             if (match is not null)
             {
                 productId = match.Value.Id;
-                outcomeName = SourceTextCleaner.Clean(match.Value.Name) ?? candidate.Name;
+                var canonicalName = SourceTextCleaner.Clean(match.Value.Name) ?? candidate.Name;
+                // Optional inch markers affect identity only, not reported display values.
+                if (TextNormalization.NormalizeForComparison(canonicalName) == TextNormalization.NormalizeForComparison(candidate.Name))
+                {
+                    outcomeName = canonicalName;
+                }
             }
             else
             {
@@ -101,7 +106,7 @@ public sealed class SqliteConsolidationItemStore(SqliteConnectionFactory connect
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = "SELECT Id, Name FROM Product WHERE NormalizedBrand = $brand AND NormalizedName = $name AND NormalizedCategory = $category LIMIT 1;";
+        command.CommandText = "SELECT Id, Name FROM Product WHERE NormalizedBrand = $brand AND NormalizedName = $name AND NormalizedCategory = $category ORDER BY Id LIMIT 1;";
         command.Parameters.AddWithValue("$brand", normalizedBrand);
         command.Parameters.AddWithValue("$name", normalizedName);
         command.Parameters.AddWithValue("$category", normalizedCategory);

@@ -10,7 +10,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="..\..\catalog.db" Link="catalog.db" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\artifacts\catalog.db" Link="artifacts\catalog.db" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <PropertyGroup>

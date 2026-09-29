@@ -33,7 +33,7 @@ public static class SourceTextCleaner
                 continue;
             }
 
-            if (!Rune.IsLetterOrDigit(rune) && rune.Value is not (>= 0x21 and <= 0x7E))
+            if (!Rune.IsLetterOrDigit(rune) && !Rune.IsPunctuation(rune) && rune.Value is not (>= 0x21 and <= 0x7E))
             {
                 continue;
             }

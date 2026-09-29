@@ -44,7 +44,7 @@ public sealed class SqliteMigrationTests
             Assert.Equal(975, await ReadInt64Async(migratedConnection, "SELECT COUNT(*) FROM Product;"));
             Assert.Equal(0, await ReadInt64Async(migratedConnection, "SELECT COUNT(*) FROM Product WHERE NormalizedName = '' OR (Brand IS NOT NULL AND NormalizedBrand IS NULL) OR (Category IS NOT NULL AND NormalizedCategory IS NULL);"));
             Assert.Equal(2, await ReadInt64Async(migratedConnection, "SELECT COUNT(*) FROM SellerProduct;"));
-            Assert.Equal(2, await ReadInt64Async(migratedConnection, "SELECT COUNT(*) FROM SchemaMigration;"));
+            Assert.Equal(3, await ReadInt64Async(migratedConnection, "SELECT COUNT(*) FROM SchemaMigration;"));
             Assert.Equal(1, await ReadInt64Async(migratedConnection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'Upload';"));
             Assert.Equal(1, await ReadInt64Async(migratedConnection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'UploadItem';"));
             Assert.Equal(1, await ReadInt64Async(migratedConnection, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'IX_Product_NormalizedIdentity';"));
@@ -110,6 +110,32 @@ public sealed class SqliteMigrationTests
         await Assert.ThrowsAsync<SqliteException>(() => command.ExecuteNonQueryAsync());
     }
 
+    [Fact]
+    public async Task OptionalInchQuoteMigrationRefreshesLegacyKeyWithoutChangingProductAndIsIdempotent()
+    {
+        using var fixture = new TemporaryCatalog();
+        var workingPath = await fixture.CreateMigratedWorkingCopyAsync();
+        var factory = new SqliteConnectionFactory(workingPath);
+        await using (var connection = await factory.OpenConnectionAsync())
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM SchemaMigration WHERE MigrationId = $migration; UPDATE Product SET NormalizedName = $old WHERE Id = 14;";
+            command.Parameters.AddWithValue("$migration", "202609290003_OptionalInchQuoteIdentity");
+            command.Parameters.AddWithValue("$old", "tablet ipad pro 12.9\"");
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var migrator = new SqliteDatabaseMigrator();
+        await migrator.MigrateAsync(workingPath);
+        await migrator.MigrateAsync(workingPath);
+
+        await using var migrated = await factory.OpenConnectionAsync();
+        Assert.Equal("tablet ipad pro 12.9", await ReadTextAsync(migrated, "SELECT NormalizedName FROM Product WHERE Id = 14;"));
+        Assert.Equal("Tablet iPad Pro 12.9\"", await ReadTextAsync(migrated, "SELECT Name FROM Product WHERE Id = 14;"));
+        Assert.Equal(975, await ReadInt64Async(migrated, "SELECT COUNT(*) FROM Product;"));
+        Assert.Equal(3, await ReadInt64Async(migrated, "SELECT COUNT(*) FROM SchemaMigration;"));
+    }
+
     private static async Task<long> ReadInt64Async(SqliteConnection connection, string commandText)
     {
         await using var command = connection.CreateCommand();
@@ -131,7 +157,7 @@ public sealed class SqliteMigrationTests
         public TemporaryCatalog()
         {
             Directory.CreateDirectory(_temporaryDirectory);
-            StarterPath = Path.Combine(AppContext.BaseDirectory, "catalog.db");
+            StarterPath = Path.Combine(AppContext.BaseDirectory, "artifacts", "catalog.db");
             Paths = new FileSystemStoragePaths(new CatalogStorageOptions(
                 Path.Combine(_temporaryDirectory, "data"),
                 StarterPath));

@@ -21,7 +21,7 @@ Read `MarketplaceCatalogConsolidator-Solution-Design.md` before implementation. 
 
 ## 3. Provided assessment assets
 
-- The assessment includes a starter SQLite database named `catalog.db`.
+- The assessment includes a starter SQLite database at `artifacts/catalog.db`.
 - The database initially contains `Product` and `SellerProduct` tables, 975 products, and no seller-product links.
 - Seller input is a JSON array with this contract:
 

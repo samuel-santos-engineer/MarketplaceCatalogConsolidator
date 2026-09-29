@@ -7,6 +7,9 @@
 **/obj
 **/TestResults
 **/artifacts
+!artifacts
+artifacts/*
+!artifacts/catalog.db
 **/coverage
 .env
 .env.*

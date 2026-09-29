@@ -174,13 +174,16 @@ public sealed class UploadReportFinalizationTests
         try
         {
             var databasePath = Path.Combine(temporaryRoot, "legacy.db");
-            File.Copy(Path.Combine(AppContext.BaseDirectory, "catalog.db"), databasePath);
+            File.Copy(Path.Combine(AppContext.BaseDirectory, "artifacts", "catalog.db"), databasePath);
             var connectionFactory = new SqliteConnectionFactory(databasePath);
             var completedAtUtc = DateTimeOffset.UtcNow.AddMinutes(-10);
             await using (var connection = await connectionFactory.OpenConnectionAsync())
             {
                 await using var setup = connection.CreateCommand();
                 setup.CommandText = "CREATE TABLE SchemaMigration (MigrationId TEXT NOT NULL PRIMARY KEY, AppliedAtUtc TEXT NOT NULL); " +
+                    "ALTER TABLE Product ADD COLUMN NormalizedName TEXT NOT NULL DEFAULT ''; " +
+                    "ALTER TABLE Product ADD COLUMN NormalizedBrand TEXT NULL; " +
+                    "ALTER TABLE Product ADD COLUMN NormalizedCategory TEXT NULL; " +
                     "INSERT INTO SchemaMigration (MigrationId, AppliedAtUtc) VALUES ('202609290001_InitialCatalogAndUploadSchema', $appliedAtUtc); " +
                     "CREATE TABLE Upload (Id TEXT NOT NULL PRIMARY KEY, IdempotencyKey TEXT NOT NULL UNIQUE, FileName TEXT NOT NULL, FileHash TEXT NOT NULL, StagedFilePath TEXT NOT NULL, ReportFilePath TEXT NOT NULL, Status TEXT NOT NULL, StartedAtUtc TEXT NOT NULL, CompletedAtUtc TEXT NULL, ReceivedCount INTEGER NOT NULL DEFAULT 0, ApprovedCount INTEGER NOT NULL DEFAULT 0, CleanedCount INTEGER NOT NULL DEFAULT 0, RejectedCount INTEGER NOT NULL DEFAULT 0, TraceId TEXT NOT NULL, FailureCode TEXT NULL, FailureMessage TEXT NULL, ReportSha256 TEXT NULL); " +
                     "INSERT INTO Upload (Id, IdempotencyKey, FileName, FileHash, StagedFilePath, ReportFilePath, Status, StartedAtUtc, CompletedAtUtc, ReceivedCount, ApprovedCount, CleanedCount, RejectedCount, TraceId) VALUES ($id, $idempotencyKey, 'legacy.json', 'old-hash', 'old-stage', 'old-report', 'Completed', $startedAtUtc, $completedAtUtc, 2, 1, 1, 0, $traceId);";
@@ -274,7 +277,7 @@ public sealed class UploadReportFinalizationTests
             Directory.CreateDirectory(_temporaryRoot);
             Paths = new FileSystemStoragePaths(new CatalogStorageOptions(
                 Path.Combine(_temporaryRoot, "data"),
-                Path.Combine(AppContext.BaseDirectory, "catalog.db")));
+                Path.Combine(AppContext.BaseDirectory, "artifacts", "catalog.db")));
             var databasePath = new SqliteWorkingDatabaseBootstrapper(Paths).EnsureWorkingDatabaseAsync().GetAwaiter().GetResult();
             new SqliteDatabaseMigrator().MigrateAsync(databasePath).GetAwaiter().GetResult();
             _connectionFactory = new SqliteConnectionFactory(databasePath);

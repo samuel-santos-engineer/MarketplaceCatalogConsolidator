@@ -7,7 +7,7 @@ public sealed class StarterCatalogTests
     [Fact]
     public void StarterDatabaseHasExpectedBaselineAndOpensReadOnly()
     {
-        var databasePath = Path.Combine(AppContext.BaseDirectory, "catalog.db");
+        var databasePath = Path.Combine(AppContext.BaseDirectory, "artifacts", "catalog.db");
         var connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = databasePath,

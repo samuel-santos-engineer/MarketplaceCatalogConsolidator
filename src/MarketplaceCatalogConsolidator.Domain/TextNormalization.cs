@@ -5,6 +5,18 @@ namespace MarketplaceCatalogConsolidator.Domain;
 
 public static class TextNormalization
 {
+    public static string NormalizeProductNameForComparison(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        var name = value.TrimEnd();
+        if (name.Length >= 2 && name[^1] == '"' && char.IsDigit(name[^2]))
+        {
+            name = name[..^1];
+        }
+
+        return NormalizeForComparison(name);
+    }
+
     public static string NormalizeForComparison(string value)
     {
         ArgumentNullException.ThrowIfNull(value);

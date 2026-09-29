@@ -125,6 +125,8 @@ SellerProduct
 
 When cleaned brand or category is `NULL`, the entry cannot match an existing product. This intentionally prevents unsafe merges based on incomplete identity.
 
+For product-name identity only, exactly one terminal ASCII double quote immediately following a digit is an optional inch marker. Both stored and incoming comparison keys omit that marker; source/canonical display values remain unchanged, and the exception alone does not change `Approved` to `Cleaned`. Other punctuation remains significant and brand/category comparisons are unaffected. A versioned migration refreshes existing working-database name keys without deleting or merging products, changing seller links, or rewriting reports. Lookup prefers the lowest product ID when existing rows share the new identity.
+
 ### 4.2 Upload and audit tables
 
 ```text
