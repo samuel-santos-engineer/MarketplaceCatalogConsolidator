@@ -70,3 +70,17 @@ Record from the successful workflow without copying secrets:
 - successful status/report reads before and after restart.
 
 The validation upload is intentionally retained as persistence evidence. Do not reset the database or remove it after deployment.
+
+## Updating the existing F1 app
+
+After merging a code change, update a clean local `main` checkout to match `origin/main` and run:
+
+```powershell
+./infra/azure/Deploy-AppServiceF1.ps1 -UpdateExisting
+```
+
+Confirm the displayed Azure identity and subscription, then type the app-specific `UPDATE-F1-...` confirmation when prompted. This mode refuses an absent or unexpected app, plan, region, image repository, HTTPS setting, or persistent-storage configuration. It builds and publishes an image tagged with the full merge commit SHA, resolves its digest, and patches only the existing app's container image reference. It does not recreate resources, reset `/home/data`, rotate `Security__ApiKey`, overwrite application settings, or submit a new validation upload.
+
+Before updating, it reads an existing report if available. After the app becomes ready, it checks the full app-settings collection for changes and verifies health, upload count, and that existing report's identity and summary. If validation fails after the image change, it attempts to restore the previous immutable image reference and reports that live health and settings still need inspection. The original create-only invocation without `-UpdateExisting` remains available for a new installation.
+
+The local `.worktrees/` directory is ignored by Git; existing worktrees are preserved, not deleted or deployed. The clean-tree and up-to-date-main checks still apply to both deployment modes.

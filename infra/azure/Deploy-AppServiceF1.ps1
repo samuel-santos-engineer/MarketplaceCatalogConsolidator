@@ -13,7 +13,9 @@ param(
     [string]$GitHubOwner = 'samuel-santos-engineer',
 
     [ValidateNotNullOrEmpty()]
-    [string]$ValidationResourceGroup = 'rg-aiq-r112-wp03-wcus-5ec325382770'
+    [string]$ValidationResourceGroup = 'rg-aiq-r112-wp03-wcus-5ec325382770',
+
+    [switch]$UpdateExisting
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,7 +38,7 @@ function Invoke-AzJson {
 
 function Invoke-ArmRequest {
     param(
-        [Parameter(Mandatory)][ValidateSet('GET', 'PUT')][string]$Method,
+        [Parameter(Mandatory)][ValidateSet('GET', 'PUT', 'PATCH')][string]$Method,
         [Parameter(Mandatory)][string]$Uri,
         [string]$Body
     )
@@ -46,7 +48,22 @@ function Invoke-ArmRequest {
         return Invoke-RestMethod -Method Get -Uri $Uri -Headers $headers
     }
 
-    return Invoke-RestMethod -Method Put -Uri $Uri -Headers $headers -ContentType 'application/json' -Body $Body
+    return Invoke-RestMethod -Method $Method -Uri $Uri -Headers $headers -ContentType 'application/json' -Body $Body
+}
+
+function Assert-AppSettingsUnchanged {
+    param([object[]]$Before, [object[]]$After)
+
+    if ($Before.Count -ne $After.Count) { throw 'App settings changed during the image update.' }
+    $afterByName = @{}
+    foreach ($setting in $After) { $afterByName[$setting.name] = $setting }
+    foreach ($setting in $Before) {
+        if (-not $afterByName.ContainsKey($setting.name) -or
+            $setting.value -cne $afterByName[$setting.name].value -or
+            $setting.slotSetting -ne $afterByName[$setting.name].slotSetting) {
+            throw 'App settings changed during the image update.'
+        }
+    }
 }
 
 function Get-ApiKeyText {
@@ -124,46 +141,76 @@ if ($account.state -ne 'Enabled' -or -not $account.isDefault) {
     PlanSku           = 'F1'
 } | Format-List
 
-$confirmation = Read-Host "Type DEPLOY-F1-$AppName to authorize creating only the documented F1 App Service resources"
-if ($confirmation -cne "DEPLOY-F1-$AppName") {
-    throw 'Deployment confirmation did not match; no cloud resources were created.'
-}
-
-& (Join-Path $PSScriptRoot 'Test-AppServiceF1Feasibility.ps1') -ValidationResourceGroup $ValidationResourceGroup -Region $region
-if ($LASTEXITCODE -ne 0) {
-    throw 'The read-only F1 Linux custom-container feasibility gate failed.'
-}
-
-$locations = Invoke-AzJson @('appservice', 'list-locations', '--sku', 'F1', '--linux-workers-enabled', '--output', 'json')
-if (-not ($locations | Where-Object { $_.name -eq 'West Central US' })) {
-    throw 'West Central US is not listed for Linux F1 in the active subscription.'
-}
-
 $subscriptionId = $account.id
-$appNameRequest = @{ name = $AppName; type = 'Microsoft.Web/sites' } | ConvertTo-Json -Compress
-$armToken = & az account get-access-token --resource https://management.azure.com/ --query accessToken --output tsv
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($armToken)) {
-    throw 'Could not obtain an in-memory Azure Resource Manager token for the read-only name check.'
-}
-try {
-    $availabilityUri = "https://management.azure.com/subscriptions/$subscriptionId/providers/Microsoft.Web/checknameavailability?api-version=2024-04-01"
-    $availability = Invoke-RestMethod -Method Post -Uri $availabilityUri -Headers @{ Authorization = "Bearer $armToken" } -ContentType 'application/json' -Body $appNameRequest
-}
-finally {
-    $armToken = $null
-}
-if (-not $availability.nameAvailable) {
-    throw "App Service name '$AppName' is unavailable; no image or Azure resource was created."
-}
-
 $groupExists = (& az group exists --name $ResourceGroup).Trim()
-if ($LASTEXITCODE -ne 0 -or $groupExists -ne 'false') {
-    throw "Resource group '$ResourceGroup' already exists or could not be checked; refusing to modify existing resources."
-}
+if ($LASTEXITCODE -ne 0) { throw 'Could not check the target resource group.' }
 
-$existingAppCount = Invoke-AzJson @('webapp', 'list', '--query', "[?name=='$AppName'] | length(@)", '--output', 'json')
-if ([int]$existingAppCount -ne 0) {
-    throw "Web app '$AppName' already exists; refusing to modify existing resources."
+if ($UpdateExisting) {
+    if ($groupExists -ne 'true') { throw 'The target resource group does not exist; refusing to create it in update mode.' }
+    $plan = Invoke-AzJson @('appservice', 'plan', 'show', '--name', $PlanName, '--resource-group', $ResourceGroup, '--output', 'json')
+    $existingApp = Invoke-AzJson @('webapp', 'show', '--name', $AppName, '--resource-group', $ResourceGroup, '--output', 'json')
+    if ($plan.sku.name -ne 'F1' -or $plan.sku.tier -ne 'Free' -or $plan.location -ne 'West Central US' -or
+        $existingApp.location -ne 'West Central US' -or $existingApp.kind -notmatch 'linux,container' -or
+        $existingApp.serverFarmId -ine $plan.id -or -not $existingApp.httpsOnly -or $existingApp.state -ne 'Running') {
+        throw 'The existing app is not the expected running, HTTPS-only Linux F1 container target.'
+    }
+    $previousImage = [string]$existingApp.siteConfig.linuxFxVersion
+    if ($previousImage -notmatch "^DOCKER\|$([regex]::Escape($imageRepository))@sha256:[a-f0-9]{64}$") {
+        throw 'The existing app does not use the expected immutable public GHCR image.'
+    }
+
+    $settingsBefore = @(Invoke-AzJson @('webapp', 'config', 'appsettings', 'list', '--name', $AppName, '--resource-group', $ResourceGroup, '--output', 'json'))
+    $settingMap = @{}
+    foreach ($setting in $settingsBefore) { $settingMap[$setting.name] = $setting.value }
+    if ($settingMap['Catalog__StorageRoot'] -ne '/home/data' -or $settingMap['WEBSITES_ENABLE_APP_SERVICE_STORAGE'] -ne 'true' -or
+        [string]::IsNullOrWhiteSpace($settingMap['Security__ApiKey'])) {
+        throw 'The existing app must retain /home/data persistence and its production API key.'
+    }
+    $baseUrl = "https://$AppName.azurewebsites.net"
+    $beforeReady = Invoke-RestMethod -Uri "$baseUrl/api/v1/ready" -TimeoutSec 15
+    if ($beforeReady.status -ne 'ready') { throw 'The existing app is not ready; refusing to update it.' }
+    $beforeUploads = Invoke-RestMethod -Uri "$baseUrl/api/v1/uploads?page=1&pageSize=25" -TimeoutSec 15
+    $beforeUploadCount = [int]$beforeUploads.totalCount
+    $existingReportId = @($beforeUploads.items | Where-Object reportAvailable | Select-Object -First 1 -ExpandProperty uploadId)[0]
+    if ($existingReportId) {
+        $beforeReport = Invoke-RestMethod -Uri "$baseUrl/api/v1/uploads/$existingReportId/report" -TimeoutSec 15
+    }
+
+    $confirmation = Read-Host "Type UPDATE-F1-$AppName to authorize replacing only this app's image; existing settings and /home/data will be preserved"
+    if ($confirmation -cne "UPDATE-F1-$AppName") { throw 'Update confirmation did not match; no image or Azure resource was changed.' }
+}
+else {
+    $confirmation = Read-Host "Type DEPLOY-F1-$AppName to authorize creating only the documented F1 App Service resources"
+    if ($confirmation -cne "DEPLOY-F1-$AppName") { throw 'Deployment confirmation did not match; no cloud resources were created.' }
+
+    & (Join-Path $PSScriptRoot 'Test-AppServiceF1Feasibility.ps1') -ValidationResourceGroup $ValidationResourceGroup -Region $region
+    if ($LASTEXITCODE -ne 0) { throw 'The read-only F1 Linux custom-container feasibility gate failed.' }
+
+    $locations = Invoke-AzJson @('appservice', 'list-locations', '--sku', 'F1', '--linux-workers-enabled', '--output', 'json')
+    if (-not ($locations | Where-Object { $_.name -eq 'West Central US' })) {
+        throw 'West Central US is not listed for Linux F1 in the active subscription.'
+    }
+
+    $appNameRequest = @{ name = $AppName; type = 'Microsoft.Web/sites' } | ConvertTo-Json -Compress
+    $armToken = & az account get-access-token --resource https://management.azure.com/ --query accessToken --output tsv
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($armToken)) {
+        throw 'Could not obtain an in-memory Azure Resource Manager token for the read-only name check.'
+    }
+    try {
+        $availabilityUri = "https://management.azure.com/subscriptions/$subscriptionId/providers/Microsoft.Web/checknameavailability?api-version=2024-04-01"
+        $availability = Invoke-RestMethod -Method Post -Uri $availabilityUri -Headers @{ Authorization = "Bearer $armToken" } -ContentType 'application/json' -Body $appNameRequest
+    }
+    finally { $armToken = $null }
+    if (-not $availability.nameAvailable) {
+        throw "App Service name '$AppName' is unavailable; no image or Azure resource was created."
+    }
+    if ($groupExists -ne 'false') {
+        throw "Resource group '$ResourceGroup' already exists; refusing to modify existing resources in create mode."
+    }
+    $existingAppCount = Invoke-AzJson @('webapp', 'list', '--query', "[?name=='$AppName'] | length(@)", '--output', 'json')
+    if ([int]$existingAppCount -ne 0) {
+        throw "Web app '$AppName' already exists; refusing to modify existing resources in create mode."
+    }
 }
 
 $dockerInfo = & $dockerCommand.Source info --format '{{.ServerVersion}}' 2>$null
@@ -171,7 +218,7 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($dockerInfo)) {
     throw 'The local Docker daemon is unavailable.'
 }
 
-$apiKey = Get-ApiKeyText
+if (-not $UpdateExisting) { $apiKey = Get-ApiKeyText }
 $imageTag = $head
 $mutableImage = "${imageRepository}:$imageTag"
 
@@ -235,6 +282,92 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($armToken)) {
 }
 
 try {
+    if ($UpdateExisting) {
+        $siteConfigUri = "https://management.azure.com/subscriptions/$subscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.Web/sites/$AppName/config/web?api-version=2021-01-01"
+        $siteConfigBody = @{ properties = @{ linuxFxVersion = "DOCKER|$immutableImage" } } | ConvertTo-Json -Depth 5 -Compress
+        $currentApp = Invoke-AzJson @('webapp', 'show', '--name', $AppName, '--resource-group', $ResourceGroup, '--output', 'json')
+        $currentSettings = @(Invoke-AzJson @('webapp', 'config', 'appsettings', 'list', '--name', $AppName, '--resource-group', $ResourceGroup, '--output', 'json'))
+        Assert-AppSettingsUnchanged -Before $settingsBefore -After $currentSettings
+        if ($currentApp.siteConfig.linuxFxVersion -ne $previousImage -or $currentApp.serverFarmId -ine $plan.id) {
+            throw 'The existing app changed during image preparation; refusing to overwrite it.'
+        }
+        $imageChanged = $false
+        try {
+            $imageChanged = $true
+            $null = Invoke-ArmRequest -Method PATCH -Uri $siteConfigUri -Body $siteConfigBody
+            $configuredImage = & az webapp show --name $AppName --resource-group $ResourceGroup --query siteConfig.linuxFxVersion --output tsv
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($configuredImage) -or $configuredImage.Trim() -ne "DOCKER|$immutableImage") {
+                throw 'The updated app image did not read back as the expected immutable digest.'
+            }
+
+            $ready = $false
+            for ($attempt = 1; $attempt -le 60; $attempt++) {
+                try {
+                    $response = Invoke-RestMethod -Uri "$baseUrl/api/v1/ready" -TimeoutSec 15
+                    if ($response.status -eq 'ready') { $ready = $true; break }
+                }
+                catch { }
+                Start-Sleep -Seconds 10
+            }
+            if (-not $ready) { throw 'The updated app did not become ready within 10 minutes.' }
+
+            $settingsAfter = @(Invoke-AzJson @('webapp', 'config', 'appsettings', 'list', '--name', $AppName, '--resource-group', $ResourceGroup, '--output', 'json'))
+            Assert-AppSettingsUnchanged -Before $settingsBefore -After $settingsAfter
+            $afterApp = Invoke-AzJson @('webapp', 'show', '--name', $AppName, '--resource-group', $ResourceGroup, '--output', 'json')
+            if (-not $afterApp.httpsOnly -or $afterApp.serverFarmId -ine $plan.id) {
+                throw 'The updated app lost its HTTPS-only setting or F1 plan binding.'
+            }
+
+            $health = Invoke-RestMethod -Uri "$baseUrl/api/v1/health" -TimeoutSec 15
+            if ($health.status -ne 'healthy') { throw 'The updated app health check failed.' }
+            $uploadsAfter = Invoke-RestMethod -Uri "$baseUrl/api/v1/uploads?page=1&pageSize=25" -TimeoutSec 15
+            if ([int]$uploadsAfter.totalCount -lt $beforeUploadCount) { throw 'The existing upload count decreased after the image update.' }
+            if ($existingReportId) {
+                $afterReport = Invoke-RestMethod -Uri "$baseUrl/api/v1/uploads/$existingReportId/report" -TimeoutSec 15
+                if ($afterReport.uploadId -ne $beforeReport.uploadId -or $afterReport.fileHash -ne $beforeReport.fileHash -or
+                    $afterReport.summary.received -ne $beforeReport.summary.received -or
+                    $afterReport.summary.approved -ne $beforeReport.summary.approved -or
+                    $afterReport.summary.cleaned -ne $beforeReport.summary.cleaned -or
+                    $afterReport.summary.rejected -ne $beforeReport.summary.rejected -or
+                    @($afterReport.items).Count -ne @($beforeReport.items).Count) {
+                    throw 'An existing immutable report changed or disappeared after the image update.'
+                }
+            }
+
+            [pscustomobject]@{
+                Mode                  = 'UpdateExisting'
+                PublicUrl             = $baseUrl
+                ImageTag              = $imageTag
+                PreviousImage         = $previousImage
+                ImageDigest           = $digest
+                AppSettingsPreserved  = 'PASS'
+                StorageRoot           = '/home/data'
+                Health                = $health.status
+                Readiness             = 'ready'
+                ExistingReportId      = $existingReportId
+                ExistingReportRetained = if ($existingReportId) { 'PASS' } else { 'NOT_AVAILABLE' }
+            } | Format-List
+        }
+        catch {
+            if ($imageChanged) {
+                try {
+                    $rollbackBody = @{ properties = @{ linuxFxVersion = $previousImage } } | ConvertTo-Json -Depth 5 -Compress
+                    $null = Invoke-ArmRequest -Method PATCH -Uri $siteConfigUri -Body $rollbackBody
+                    $restoredImage = & az webapp show --name $AppName --resource-group $ResourceGroup --query siteConfig.linuxFxVersion --output tsv
+                    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($restoredImage) -or $restoredImage.Trim() -ne $previousImage) {
+                        throw 'The previous image reference did not read back after rollback.'
+                    }
+                    Write-Warning 'Update validation failed; the previous image reference was restored. Verify live health and settings.'
+                }
+                catch {
+                    Write-Warning 'Update validation failed and automatic image rollback failed. Inspect the existing app immediately.'
+                }
+            }
+            throw
+        }
+        return
+    }
+
     & az group create --name $ResourceGroup --location $region --output none
     if ($LASTEXITCODE -ne 0) { throw 'Resource group creation failed.' }
 
@@ -264,9 +397,9 @@ try {
     $site = Invoke-AzJson @('webapp', 'show', '--name', $AppName, '--resource-group', $ResourceGroup, '--query', '{httpsOnly:httpsOnly,state:state}', '--output', 'json')
     if (-not $site.httpsOnly) { throw 'HTTPS-only configuration did not read back as enabled.' }
 
-    $configuredImage = (& az resource show --resource-group $ResourceGroup --resource-type Microsoft.Web/sites/config --name "$AppName/web" --query properties.linuxFxVersion --output tsv).Trim()
-    if ($LASTEXITCODE -ne 0) { throw 'Could not read back the configured App Service image.' }
-    if ($configuredImage -ne "DOCKER|$immutableImage") { throw 'The configured App Service image is not the expected immutable digest.' }
+    $configuredImage = & az webapp show --name $AppName --resource-group $ResourceGroup --query siteConfig.linuxFxVersion --output tsv
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($configuredImage)) { throw 'Could not read back the configured App Service image.' }
+    if ($configuredImage.Trim() -ne "DOCKER|$immutableImage") { throw 'The configured App Service image is not the expected immutable digest.' }
 
     $settingsReadback = Invoke-AzJson @('webapp', 'config', 'appsettings', 'list', '--name', $AppName, '--resource-group', $ResourceGroup, '--output', 'json')
     $settingMap = @{}
@@ -373,4 +506,7 @@ try {
 finally {
     $apiKey = $null
     $armToken = $null
+    $settingsBefore = $null
+    $settingsAfter = $null
+    $currentSettings = $null
 }
