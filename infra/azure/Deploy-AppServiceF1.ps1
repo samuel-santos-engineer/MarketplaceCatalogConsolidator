@@ -33,7 +33,8 @@ function Invoke-AzJson {
         throw "Azure CLI command failed: az $($Arguments -join ' ')"
     }
 
-    return $output | ConvertFrom-Json
+    $parsed = $output | ConvertFrom-Json
+    foreach ($item in @($parsed)) { Write-Output $item }
 }
 
 function Invoke-ArmRequest {
