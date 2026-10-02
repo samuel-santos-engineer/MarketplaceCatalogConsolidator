@@ -105,12 +105,39 @@
             <tbody id="report-summary-rows"></tbody>
           </table>
         </div>
-        <div class="table-wrap">
+        <h3 id="report-items-title">Item outcomes</h3>
+        <form id="report-items-filter" class="inline-filters" aria-labelledby="report-items-title">
+          <label>Item status
+            <select id="report-item-status" name="status">
+              <option value="">All outcomes</option>
+              <option value="Approved">Approved</option>
+              <option value="Cleaned">Cleaned</option>
+              <option value="Rejected">Rejected</option>
+            </select>
+          </label>
+          <label>Items per page
+            <select id="report-items-page-size" name="pageSize">
+              <option value="10">10</option>
+              <option value="25" selected>25</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </label>
+          <button type="submit">Apply item filter</button>
+        </form>
+        <p id="report-items-count" role="status" aria-live="polite"></p>
+        <div id="report-items-table-wrap" class="table-wrap">
           <table>
             <caption>Item outcomes</caption>
             <thead><tr><th scope="col">Source ID</th><th scope="col">Seller</th><th scope="col">Name</th><th scope="col">Brand</th><th scope="col">Category</th><th scope="col">Status</th><th scope="col">Action taken</th></tr></thead>
             <tbody id="report-items"></tbody>
           </table>
+        </div>
+        <p id="report-items-empty" class="empty-state" hidden>No item outcomes match this status.</p>
+        <div class="pagination" aria-label="Report item pagination">
+          <button id="report-items-previous" type="button" class="button-secondary" disabled>Previous</button>
+          <span id="report-items-page">Page 1 of 1</span>
+          <button id="report-items-next" type="button" class="button-secondary" disabled>Next</button>
         </div>
       </div>
     </section>

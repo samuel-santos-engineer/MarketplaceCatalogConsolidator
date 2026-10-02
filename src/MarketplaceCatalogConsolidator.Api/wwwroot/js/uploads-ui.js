@@ -16,11 +16,22 @@ const listNext = document.querySelector("#uploads-next");
 const reportPanel = document.querySelector("#report-panel");
 const reportStatus = document.querySelector("#report-status");
 const reportContent = document.querySelector("#report-content");
+const reportItemsForm = document.querySelector("#report-items-filter");
+const reportItemsRows = document.querySelector("#report-items");
+const reportItemsCount = document.querySelector("#report-items-count");
+const reportItemsTable = document.querySelector("#report-items-table-wrap");
+const reportItemsEmpty = document.querySelector("#report-items-empty");
+const reportItemsPageLabel = document.querySelector("#report-items-page");
+const reportItemsPrevious = document.querySelector("#report-items-previous");
+const reportItemsNext = document.querySelector("#report-items-next");
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 let listPage = 1;
 let listTotalPages = 1;
 let listRequest;
 let reportRequest;
+let reportItems = [];
+let reportItemsPage = 1;
+let reportItemsTotalPages = 1;
 
 function element(name, text, className) {
   const result = document.createElement(name);
@@ -211,6 +222,45 @@ listForm.addEventListener("change", () => { listPage = 1; });
 listPrevious.addEventListener("click", () => { if (listPage > 1) { listPage -= 1; loadUploads(); } });
 listNext.addEventListener("click", () => { if (listPage < listTotalPages) { listPage += 1; loadUploads(); } });
 
+function renderReportItems() {
+  const status = reportItemsForm.elements.status.value;
+  const pageSize = Number(reportItemsForm.elements.pageSize.value);
+  const matching = status ? reportItems.filter(item => item.status === status) : reportItems;
+  reportItemsTotalPages = Math.max(1, Math.ceil(matching.length / pageSize));
+  reportItemsPage = Math.min(reportItemsPage, reportItemsTotalPages);
+  reportItemsRows.replaceChildren();
+  const start = (reportItemsPage - 1) * pageSize;
+  for (const item of matching.slice(start, start + pageSize)) {
+    const row = document.createElement("tr");
+    appendCell(row, item.id ?? "—");
+    appendCell(row, item.cleanedSellerName ?? item.sellerName ?? "—");
+    appendCell(row, item.cleanedName ?? item.name ?? "—");
+    appendCell(row, item.cleanedBrand ?? item.brand ?? "—");
+    appendCell(row, item.cleanedCategory ?? item.category ?? "—");
+    appendCell(row, statusPill(item.status));
+    appendCell(row, item.actionTaken);
+    reportItemsRows.append(row);
+  }
+  reportItemsCount.textContent = `${matching.length} matching item${matching.length === 1 ? "" : "s"}`;
+  reportItemsPageLabel.textContent = `Page ${reportItemsPage} of ${reportItemsTotalPages}`;
+  reportItemsPrevious.disabled = reportItemsPage === 1;
+  reportItemsNext.disabled = reportItemsPage === reportItemsTotalPages;
+  reportItemsEmpty.hidden = matching.length !== 0;
+  reportItemsTable.hidden = matching.length === 0;
+}
+
+reportItemsForm.addEventListener("submit", event => {
+  event.preventDefault();
+  reportItemsPage = 1;
+  renderReportItems();
+});
+reportItemsPrevious.addEventListener("click", () => {
+  if (reportItemsPage > 1) { reportItemsPage -= 1; renderReportItems(); }
+});
+reportItemsNext.addEventListener("click", () => {
+  if (reportItemsPage < reportItemsTotalPages) { reportItemsPage += 1; renderReportItems(); }
+});
+
 function addMetadata(label, value) {
   const container = document.createElement("div");
   container.append(element("dt", label), element("dd", value ?? "—"));
@@ -265,23 +315,18 @@ function renderReport(report) {
   addSummaryRow("Cleaned", summary.cleaned);
   addSummaryRow("Rejected", summary.rejected);
 
-  const itemRows = document.querySelector("#report-items");
-  itemRows.replaceChildren();
-  for (const item of report.items || []) {
-    const row = document.createElement("tr");
-    appendCell(row, item.id ?? "—");
-    appendCell(row, item.cleanedSellerName ?? item.sellerName ?? "—");
-    appendCell(row, item.cleanedName ?? item.name ?? "—");
-    appendCell(row, item.cleanedBrand ?? item.brand ?? "—");
-    appendCell(row, item.cleanedCategory ?? item.category ?? "—");
-    appendCell(row, statusPill(item.status));
-    appendCell(row, item.actionTaken);
-    itemRows.append(row);
-  }
+  reportItems = report.items || [];
+  renderReportItems();
 }
 
 async function loadSelectedReport() {
   reportRequest?.abort();
+  reportItems = [];
+  reportItemsPage = 1;
+  reportItemsTotalPages = 1;
+  reportItemsForm.reset();
+  reportItemsRows.replaceChildren();
+  reportItemsCount.textContent = "";
   const uploadId = new URLSearchParams(window.location.search).get("uploadId");
   if (!uploadId) { reportPanel.hidden = true; return; }
   reportPanel.hidden = false;
@@ -290,10 +335,12 @@ async function loadSelectedReport() {
     showNotice(reportStatus, "The report URL contains an invalid upload ID.", "error");
     return;
   }
-  reportRequest = new AbortController();
+  const request = new AbortController();
+  reportRequest = request;
   showNotice(reportStatus, "Loading immutable report…");
   try {
-    const response = await fetch(`/api/v1/uploads/${encodeURIComponent(uploadId)}/report`, { signal: reportRequest.signal });
+    const response = await fetch(`/api/v1/uploads/${encodeURIComponent(uploadId)}/report`, { signal: request.signal });
+    if (request.signal.aborted) return;
     if (response.status === 409) {
       reportStatus.replaceChildren(element("span", "The report is still pending. "));
       const link = element("a", "Open live status");
@@ -304,9 +351,10 @@ async function loadSelectedReport() {
       return;
     }
     if (!response.ok) throw new Error(await readError(response));
-    renderReport(await response.json());
+    const report = await response.json();
+    if (!request.signal.aborted) renderReport(report);
   } catch (error) {
-    if (error.name !== "AbortError") showNotice(reportStatus, error.message || "The report could not be loaded.", "error");
+    if (!request.signal.aborted && error.name !== "AbortError") showNotice(reportStatus, error.message || "The report could not be loaded.", "error");
   }
 }
 
