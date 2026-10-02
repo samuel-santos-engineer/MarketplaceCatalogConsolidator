@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Submit marketplace catalog uploads and inspect immutable reports.">
   <title>Uploads | Marketplace Catalog Consolidator</title>
-  <link rel="stylesheet" href="/css/catalog-ui.css">
-  <script src="/js/uploads-ui.js" defer></script>
+  <link rel="stylesheet" href="/css/catalog-ui.css?v=report-filters-20261002">
+  <script src="/js/uploads-ui.js?v=report-filters-20261002" defer></script>
 </head>
 <body>
   <header class="site-header">
@@ -105,12 +105,23 @@
             <tbody id="report-summary-rows"></tbody>
           </table>
         </div>
-        <div class="table-wrap">
+        <div id="report-items-table-wrap" class="table-wrap">
           <table>
-            <caption>Item outcomes</caption>
-            <thead><tr><th scope="col">Source ID</th><th scope="col">Seller</th><th scope="col">Name</th><th scope="col">Brand</th><th scope="col">Category</th><th scope="col">Status</th><th scope="col">Action taken</th></tr></thead>
+            <caption id="report-items-caption" tabindex="-1">Item outcomes</caption>
+            <thead><tr><th scope="col">Source ID</th><th scope="col"><button type="button" class="column-filter-trigger" data-report-filter="seller" aria-expanded="false">Seller ▾</button><div class="column-filter-menu" hidden></div></th><th scope="col">Name</th><th scope="col"><button type="button" class="column-filter-trigger" data-report-filter="brand" aria-expanded="false">Brand ▾</button><div class="column-filter-menu" hidden></div></th><th scope="col"><button type="button" class="column-filter-trigger" data-report-filter="category" aria-expanded="false">Category ▾</button><div class="column-filter-menu" hidden></div></th><th scope="col"><button type="button" class="column-filter-trigger" data-report-filter="status" aria-expanded="false">Status ▾</button><div class="column-filter-menu" hidden></div></th><th scope="col">Action taken</th></tr></thead>
             <tbody id="report-items"></tbody>
           </table>
+        </div>
+        <p id="report-items-empty" class="empty-state" hidden>No item outcomes match these filters.</p>
+        <div class="report-item-controls">
+          <p id="report-items-count" role="status" aria-live="polite"></p>
+          <label>Items per page <select id="report-items-page-size"><option>10</option><option selected>25</option><option>50</option><option>100</option></select></label>
+          <button id="report-items-clear" type="button" class="button-secondary">Clear filters</button>
+        </div>
+        <div class="pagination" aria-label="Report item pagination">
+          <button id="report-items-previous" type="button" class="button-secondary" disabled>Previous</button>
+          <span id="report-items-page">Page 1 of 1</span>
+          <button id="report-items-next" type="button" class="button-secondary" disabled>Next</button>
         </div>
       </div>
     </section>

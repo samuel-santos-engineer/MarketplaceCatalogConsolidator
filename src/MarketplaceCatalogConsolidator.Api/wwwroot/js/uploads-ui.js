@@ -16,11 +16,25 @@ const listNext = document.querySelector("#uploads-next");
 const reportPanel = document.querySelector("#report-panel");
 const reportStatus = document.querySelector("#report-status");
 const reportContent = document.querySelector("#report-content");
+const reportItemsRows = document.querySelector("#report-items");
+const reportItemsEmpty = document.querySelector("#report-items-empty");
+const reportItemsCount = document.querySelector("#report-items-count");
+const reportItemsPageSize = document.querySelector("#report-items-page-size");
+const reportItemsPageLabel = document.querySelector("#report-items-page");
+const reportItemsPrevious = document.querySelector("#report-items-previous");
+const reportItemsNext = document.querySelector("#report-items-next");
+const reportFilterColumns = ["seller", "brand", "category", "status"];
+const reportFilterLabels = { seller: "Seller", brand: "Brand", category: "Category", status: "Status" };
+const reportFilterTriggers = [...document.querySelectorAll(".column-filter-trigger")];
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 let listPage = 1;
 let listTotalPages = 1;
 let listRequest;
 let reportRequest;
+let reportItems = [];
+let reportItemsPage = 1;
+let reportItemsTotalPages = 1;
+const reportFilters = { seller: null, brand: null, category: null, status: null };
 
 function element(name, text, className) {
   const result = document.createElement(name);
@@ -219,11 +233,134 @@ function addMetadata(label, value) {
 
 function addSummaryRow(label, count) {
   const row = document.createElement("tr");
-  const heading = element("th", label);
+  const heading = document.createElement("th");
   heading.scope = "row";
+  const shortcut = element("button", label, "summary-shortcut");
+  shortcut.type = "button";
+  shortcut.setAttribute("aria-label", `Show ${label.toLowerCase()} item outcomes, ${count} total`);
+  shortcut.addEventListener("click", () => {
+    clearReportFilters();
+    if (label !== "Received") reportFilters.status = label;
+    reportItemsPage = 1;
+    renderReportItems();
+    const caption = document.querySelector("#report-items-caption");
+    caption.focus();
+    caption.scrollIntoView({ block: "start" });
+  });
+  heading.append(shortcut);
   row.append(heading, element("td", String(count)));
   document.querySelector("#report-summary-rows").append(row);
 }
+
+function displayedReportValue(item, column) {
+  switch (column) {
+    case "seller": return item.cleanedSellerName ?? item.sellerName ?? "—";
+    case "brand": return item.cleanedBrand ?? item.brand ?? "—";
+    case "category": return item.cleanedCategory ?? item.category ?? "—";
+    case "status": return item.status ?? "—";
+    default: return "—";
+  }
+}
+
+function clearReportFilters() {
+  for (const column of reportFilterColumns) reportFilters[column] = null;
+  closeReportFilterMenus();
+}
+
+function closeReportFilterMenus() {
+  for (const trigger of reportFilterTriggers) {
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.nextElementSibling.hidden = true;
+  }
+}
+
+function renderReportFilterMenus() {
+  for (const trigger of reportFilterTriggers) {
+    const column = trigger.dataset.reportFilter;
+    const selected = reportFilters[column];
+    trigger.dataset.active = String(selected !== null);
+    trigger.setAttribute("aria-label", `${reportFilterLabels[column]} filter: ${selected === null ? "All" : selected === "" ? "(blank)" : selected === "—" ? "(blank —)" : selected}`);
+    const menu = trigger.nextElementSibling;
+    menu.id = `report-filter-${column}-menu`;
+    trigger.setAttribute("aria-controls", menu.id);
+    menu.replaceChildren();
+    menu.setAttribute("role", "group");
+    menu.setAttribute("aria-label", `${reportFilterLabels[column]} choices`);
+    const values = [null, ...new Set(reportItems.map(item => displayedReportValue(item, column)))];
+    for (const value of values) {
+      const choice = element("button", value === null ? "All" : value === "" ? "(blank)" : value === "—" ? "(blank —)" : value);
+      choice.type = "button";
+      choice.setAttribute("aria-pressed", String(selected === value));
+      choice.addEventListener("click", () => {
+        reportFilters[column] = value;
+        reportItemsPage = 1;
+        closeReportFilterMenus();
+        renderReportItems();
+        trigger.focus();
+      });
+      menu.append(choice);
+    }
+  }
+}
+
+function renderReportItems() {
+  renderReportFilterMenus();
+  const matching = reportItems.filter(item => reportFilterColumns.every(column =>
+    reportFilters[column] === null || displayedReportValue(item, column) === reportFilters[column]));
+  const pageSize = Number(reportItemsPageSize.value);
+  reportItemsTotalPages = Math.max(1, Math.ceil(matching.length / pageSize));
+  reportItemsPage = Math.min(reportItemsPage, reportItemsTotalPages);
+  reportItemsRows.replaceChildren();
+  const start = (reportItemsPage - 1) * pageSize;
+  for (const item of matching.slice(start, start + pageSize)) {
+    const row = document.createElement("tr");
+    appendCell(row, item.id ?? "—");
+    appendCell(row, displayedReportValue(item, "seller"));
+    appendCell(row, item.cleanedName ?? item.name ?? "—");
+    appendCell(row, displayedReportValue(item, "brand"));
+    appendCell(row, displayedReportValue(item, "category"));
+    appendCell(row, statusPill(displayedReportValue(item, "status")));
+    appendCell(row, item.actionTaken);
+    reportItemsRows.append(row);
+  }
+  reportItemsCount.textContent = `${matching.length} matching item${matching.length === 1 ? "" : "s"}`;
+  reportItemsPageLabel.textContent = `Page ${reportItemsPage} of ${reportItemsTotalPages}`;
+  reportItemsPrevious.disabled = reportItemsPage === 1;
+  reportItemsNext.disabled = reportItemsPage === reportItemsTotalPages;
+  reportItemsEmpty.hidden = matching.length !== 0;
+}
+
+for (const trigger of reportFilterTriggers) {
+  trigger.addEventListener("keydown", event => {
+    if (event.key === "Escape") closeReportFilterMenus();
+  });
+  trigger.addEventListener("click", () => {
+    const wasOpen = trigger.getAttribute("aria-expanded") === "true";
+    closeReportFilterMenus();
+    if (!wasOpen) {
+      trigger.setAttribute("aria-expanded", "true");
+      trigger.nextElementSibling.hidden = false;
+    }
+  });
+  trigger.nextElementSibling.addEventListener("keydown", event => {
+    if (event.key === "Escape") { closeReportFilterMenus(); trigger.focus(); }
+  });
+}
+document.addEventListener("click", event => {
+  if (!event.target.closest("th:has(> .column-filter-menu)")) closeReportFilterMenus();
+});
+document.querySelector("#report-items-clear").addEventListener("click", () => {
+  clearReportFilters();
+  reportItemsPage = 1;
+  renderReportItems();
+});
+reportItemsPageSize.addEventListener("change", () => { reportItemsPage = 1; renderReportItems(); });
+reportItemsPrevious.addEventListener("click", () => {
+  if (reportItemsPage > 1) { reportItemsPage -= 1; renderReportItems(); }
+});
+reportItemsNext.addEventListener("click", () => {
+  if (reportItemsPage < reportItemsTotalPages) { reportItemsPage += 1; renderReportItems(); }
+});
 
 function renderReport(report) {
   reportContent.hidden = false;
@@ -265,23 +402,17 @@ function renderReport(report) {
   addSummaryRow("Cleaned", summary.cleaned);
   addSummaryRow("Rejected", summary.rejected);
 
-  const itemRows = document.querySelector("#report-items");
-  itemRows.replaceChildren();
-  for (const item of report.items || []) {
-    const row = document.createElement("tr");
-    appendCell(row, item.id ?? "—");
-    appendCell(row, item.cleanedSellerName ?? item.sellerName ?? "—");
-    appendCell(row, item.cleanedName ?? item.name ?? "—");
-    appendCell(row, item.cleanedBrand ?? item.brand ?? "—");
-    appendCell(row, item.cleanedCategory ?? item.category ?? "—");
-    appendCell(row, statusPill(item.status));
-    appendCell(row, item.actionTaken);
-    itemRows.append(row);
-  }
+  reportItems = report.items || [];
+  renderReportItems();
 }
 
 async function loadSelectedReport() {
   reportRequest?.abort();
+  reportItems = [];
+  reportItemsPage = 1;
+  reportItemsPageSize.value = "25";
+  clearReportFilters();
+  reportItemsRows.replaceChildren();
   const uploadId = new URLSearchParams(window.location.search).get("uploadId");
   if (!uploadId) { reportPanel.hidden = true; return; }
   reportPanel.hidden = false;
@@ -290,10 +421,12 @@ async function loadSelectedReport() {
     showNotice(reportStatus, "The report URL contains an invalid upload ID.", "error");
     return;
   }
-  reportRequest = new AbortController();
+  const request = new AbortController();
+  reportRequest = request;
   showNotice(reportStatus, "Loading immutable report…");
   try {
-    const response = await fetch(`/api/v1/uploads/${encodeURIComponent(uploadId)}/report`, { signal: reportRequest.signal });
+    const response = await fetch(`/api/v1/uploads/${encodeURIComponent(uploadId)}/report`, { signal: request.signal });
+    if (request.signal.aborted) return;
     if (response.status === 409) {
       reportStatus.replaceChildren(element("span", "The report is still pending. "));
       const link = element("a", "Open live status");
@@ -304,9 +437,10 @@ async function loadSelectedReport() {
       return;
     }
     if (!response.ok) throw new Error(await readError(response));
-    renderReport(await response.json());
+    const report = await response.json();
+    if (!request.signal.aborted) renderReport(report);
   } catch (error) {
-    if (error.name !== "AbortError") showNotice(reportStatus, error.message || "The report could not be loaded.", "error");
+    if (!request.signal.aborted && error.name !== "AbortError") showNotice(reportStatus, error.message || "The report could not be loaded.", "error");
   }
 }
 
