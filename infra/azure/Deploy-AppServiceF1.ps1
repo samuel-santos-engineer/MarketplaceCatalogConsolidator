@@ -67,6 +67,36 @@ function Assert-AppSettingsUnchanged {
     }
 }
 
+function Test-AnonymousManifestAccess {
+    param([Parameter(Mandatory)][string]$Image, [Parameter(Mandatory)][string]$DockerExecutable)
+
+    $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+    $dockerConfig = [IO.Path]::GetFullPath((Join-Path $tempRoot ('mcc-anon-ghcr-' + [guid]::NewGuid().ToString('N'))))
+    if (-not $dockerConfig.StartsWith($tempRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'The anonymous Docker configuration path is outside the temporary directory.'
+    }
+    $hadDockerConfig = Test-Path Env:DOCKER_CONFIG
+    $previousDockerConfig = $env:DOCKER_CONFIG
+    $accessible = $false
+    try {
+        New-Item -ItemType Directory -Path $dockerConfig | Out-Null
+        $env:DOCKER_CONFIG = $dockerConfig
+        try {
+            & $DockerExecutable manifest inspect $Image | Out-Null
+            $accessible = $LASTEXITCODE -eq 0
+        }
+        catch { $accessible = $false }
+    }
+    finally {
+        if ($hadDockerConfig) { $env:DOCKER_CONFIG = $previousDockerConfig }
+        else { Remove-Item Env:DOCKER_CONFIG -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $dockerConfig) {
+            Remove-Item -LiteralPath $dockerConfig -Recurse -Force
+        }
+    }
+    return $accessible
+}
+
 function Get-ApiKeyText {
     $secureKey = Read-Host 'Enter the production API key (input is hidden)' -AsSecureString
     if ($secureKey.Length -lt 32) {
@@ -245,32 +275,19 @@ if ($LASTEXITCODE -ne 0 -or $digest -notmatch '^sha256:[a-f0-9]{64}$') {
 }
 $immutableImage = "$imageRepository@$digest"
 
-$ghAccount = & gh api user --jq .login
-if ($LASTEXITCODE -ne 0 -or $ghAccount.Trim() -ine $GitHubOwner) {
-    throw 'GitHub CLI must be authenticated as the image repository owner before package visibility can be changed.'
-}
-
-& gh api --method PATCH "/user/packages/container/$packageName" -f visibility=public | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    throw 'Could not make the GHCR package public. Set package visibility to Public in GitHub and rerun; Azure resources were not created.'
-}
-
-$dockerConfig = Join-Path ([IO.Path]::GetTempPath()) ('mcc-anon-ghcr-' + [guid]::NewGuid().ToString('N'))
-$hadDockerConfig = Test-Path Env:DOCKER_CONFIG
-$previousDockerConfig = $env:DOCKER_CONFIG
-try {
-    New-Item -ItemType Directory -Path $dockerConfig | Out-Null
-    $env:DOCKER_CONFIG = $dockerConfig
-    & $dockerCommand.Source manifest inspect $immutableImage | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw 'Anonymous GHCR manifest access failed; no Azure resources were created.'
+$anonymousPull = Test-AnonymousManifestAccess -Image $immutableImage -DockerExecutable $dockerCommand.Source
+if (-not $anonymousPull) {
+    $ghAccount = & gh api user --jq .login
+    if ($LASTEXITCODE -ne 0 -or $ghAccount.Trim() -ine $GitHubOwner) {
+        throw 'GitHub CLI must be authenticated as the image repository owner before package visibility can be changed.'
     }
+    & gh api --method PATCH "/user/packages/container/$packageName" -f visibility=public | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Could not make the GHCR package public. Set package visibility to Public in GitHub and rerun; Azure resources were not created.'
+    }
+    $anonymousPull = Test-AnonymousManifestAccess -Image $immutableImage -DockerExecutable $dockerCommand.Source
 }
-finally {
-    if ($hadDockerConfig) { $env:DOCKER_CONFIG = $previousDockerConfig }
-    else { Remove-Item Env:DOCKER_CONFIG -ErrorAction SilentlyContinue }
-    Remove-Item -LiteralPath $dockerConfig -Recurse -Force -ErrorAction SilentlyContinue
-}
+if (-not $anonymousPull) { throw 'Anonymous GHCR manifest access failed; no Azure resources were created.' }
 
 Write-Host "Image repository: $imageRepository"
 Write-Host "Full commit SHA tag: $imageTag"
